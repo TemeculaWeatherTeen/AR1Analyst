@@ -17,6 +17,10 @@
     <button id="loc">📍</button>
     <label>FOV <input id="fov" type="range" min="40" max="90" value="63"></label>
     <label>Yaw <input id="yaw" type="range" min="-180" max="180" value="0"></label>
+    <details id="tilt-control">
+      <summary>Elevation tilts</summary>
+      <div id="tilt-options" aria-label="Select radar elevation angles">Loading scan angles…</div>
+    </details>
   </div>
   <div id="st">Pick a station, then Start AR.</div>
   <canvas id="ppi" width="300" height="300"></canvas>
