@@ -1,0 +1,70 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #000;
+  color: #fff;
+  font: 14px system-ui, sans-serif;
+  overflow: hidden;
+  touch-action: none;
+}
+
+#cam,
+#ar,
+#hud {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#hud {
+  pointer-events: none;
+  z-index: 2;
+}
+
+#ui {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  padding: max(8px, env(safe-area-inset-top)) 8px 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  background: #000a;
+  z-index: 3;
+}
+
+select,
+button {
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 0;
+}
+
+#st {
+  position: fixed;
+  left: 8px;
+  bottom: max(8px, env(safe-area-inset-bottom));
+  z-index: 3;
+  font-size: 12px;
+  background: #000a;
+  padding: 6px 8px;
+  border-radius: 8px;
+  max-width: 55%;
+}
+
+#ppi {
+  position: fixed;
+  right: 8px;
+  bottom: max(8px, env(safe-area-inset-bottom));
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  background: #000a;
+  z-index: 3;
+}
