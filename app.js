@@ -24,7 +24,9 @@ fetch(originalSource)
       return source.replace(pattern, after);
     };
 
-    let source = originalScript.textContent;
+    // Normalize line endings before patching the upstream script. Some
+    // deployments return CRLF content, which breaks exact-string replacements.
+    let source = originalScript.textContent.replace(/\r\n?/g, '\n');
 
     // Keep iPad Safari's sensor axes aligned with screen rotation and let
     // compass corrections converge more quickly.
