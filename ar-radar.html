@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>AR NEXRAD Radar</title>
+<style>
+html,body{margin:0;height:100%;background:#000;color:#fff;font:14px system-ui,sans-serif;overflow:hidden;touch-action:none}
+#cam,#ar,#hud{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
+#hud{pointer-events:none;z-index:2}
+#ui{position:fixed;left:0;right:0;top:0;padding:max(8px,env(safe-area-inset-top)) 8px 8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#000a;z-index:3}
+select,button{font:inherit;padding:6px 10px;border-radius:8px;border:0}
+#st{position:fixed;left:8px;bottom:max(8px,env(safe-area-inset-bottom));z-index:3;font-size:12px;background:#000a;padding:6px 8px;border-radius:8px;max-width:55%}
+#ppi{position:fixed;right:8px;bottom:max(8px,env(safe-area-inset-bottom));width:150px;height:150px;border-radius:50%;background:#000a;z-index:3}
+</style></head><body>
+<video id="cam" playsinline muted autoplay></video>
+<canvas id="ar"></canvas><canvas id="hud"></canvas>
+<div id="ui">
+ <select id="stn" aria-label="Radar station"></select>
+ <button id="go">Start AR</button>
+ <button id="loc">📍</button><label>FOV <input id="fov" type="range" min="40" max="90" value="63"></label><label>Yaw <input id="yaw" type="range" min="-180" max="180" value="0"></label>
+</div>
+<div id="st">Pick a station, then Start AR.</div>
+<canvas id="ppi" width="300" height="300"></canvas>
+<script>
+const $=id=>document.getElementById(id), B='https://unidata-nexrad-level2.s3.amazonaws.com/';
+const RAW=`KNKX 32.919 -117.042;KSOX 33.818 -117.636;KVTX 34.412 -119.179;KMUX 37.155 -121.898;KDAX 38.501 -121.678;KRTX 45.715 -122.965;KATX 48.195 -122.496;KOTX 47.680 -117.627;KFSX 34.574 -111.198;KIWA 33.289 -111.670;KMTX 41.263 -112.448;KFTG 39.787 -104.546;KABX 35.150 -106.824;KEPZ 31.873 -106.698;KEWX 29.704 -98.029;KFWS 32.573 -97.303;KTLX 35.333 -97.278;KHGX 29.472 -95.079;KLOT 41.604 -88.085;KMPX 44.849 -93.566;KDVN 41.612 -90.581;KEAX 38.810 -94.264;KILX 40.151 -89.337;KDTX 42.700 -83.472;KCLE 41.413 -81.860;KOKX 40.866 -72.864;KDIX 39.947 -74.411;KLWX 38.975 -77.478;KFFC 33.364 -84.566;KAMX 25.611 -80.413;KTBW 27.705 -82.402;KJAX 30.485 -81.702;KBOX 41.956 -71.137`;
+const ST={};RAW.split(';').forEach(s=>{const [i,a,o]=s.split(' ');ST[i]={lat:+a,lon:+o};$('stn').add(new Option(i,i))});
+$('stn').value='KNKX';
+
+//BZ-START  minimal bzip2 decoder
+function bunzip(src){
+ let pos=0,buf=0,bc=0;
+ const bits=n=>{while(bc<n){buf=(buf<<8)|src[pos++];bc+=8}bc-=n;const r=(buf>>>bc)&((1<<n)-1);buf&=(1<<bc)-1;return r};
+ if(bits(8)!=66||bits(8)!=90||bits(8)!=104)throw new Error('bz2');
+ const lvl=bits(8)-48;let out=new Uint8Array(1<<20),op=0;
+ const put=b=>{if(op==out.length){const t=new Uint8Array(op*2);t.set(out);out=t}out[op++]=b};
+ const tt=new Uint32Array(lvl*100000);
+ for(;;){
+  const m1=bits(24),m2=bits(24);
+  if(m1==0x177245&&m2==0x385090)break;
+  if(m1!=0x314159)throw new Error('bz2 block');
+  bits(16);bits(16);bits(1);
+  const orig=bits(24),used=bits(16),seq=[];
+  for(let i=0;i<16;i++)if(used&(0x8000>>i)){const m=bits(16);for(let j=0;j<16;j++)if(m&(0x8000>>j))seq.push(i*16+j)}
+  const na=seq.length+2,ng=bits(3),nsel=bits(15),sel=[],mg=[0,1,2,3,4,5].slice(0,ng);
+  for(let i=0;i<nsel;i++){let j=0;while(bits(1))j++;const v=mg[j];mg.splice(j,1);mg.unshift(v);sel.push(v)}
+  const T=[];
+  for(let t=0;t<ng;t++){
+   const len=[];let c=bits(5);
+   for(let i=0;i<na;i++){while(bits(1))c+=bits(1)?-1:1;len.push(c)}
+   let mn=32,mx=0;for(const l of len){if(l<mn)mn=l;if(l>mx)mx=l}
+   const perm=[],lim=[],off=[];let code=0,idx=0;
+   for(let l=mn;l<=mx;l++){let cnt=0;for(let i=0;i<na;i++)if(len[i]==l){perm.push(i);cnt++}
+    off[l]=idx-code;lim[l]=code+cnt-1;code=(code+cnt)<<1;idx+=cnt}
+   T.push({mn,lim,off,perm});
+  }
+  const eob=na-1,mtf=seq.slice(),cnt=new Uint32Array(256);let n=0,gi=0,left=0,tab,run=0,rb=1;
+  for(;;){
+   if(!left){tab=T[sel[gi++]];left=50}left--;
+   let l=tab.mn,z=bits(l);while(z>tab.lim[l]){l++;z=(z<<1)|bits(1)}
+   const s=tab.perm[z+tab.off[l]];
+   if(s<2){run+=rb<<s;rb<<=1;continue}
+   if(run){const b=mtf[0];cnt[b]+=run;while(run--)tt[n++]=b;run=0;rb=1}
+   if(s==eob)break;
+   const b=mtf[s-1];mtf.splice(s-1,1);mtf.unshift(b);tt[n++]=b;cnt[b]++;
+  }
+  const cf=new Uint32Array(256);let sum=0;for(let i=0;i<256;i++){cf[i]=sum;sum+=cnt[i]}
+  for(let i=0;i<n;i++){const b=tt[i]&255;tt[cf[b]++]|=i<<8}
+  let tp=tt[orig]>>>8,last=-1,rc=0;
+  for(let i=0;i<n;i++){
+   tp=tt[tp];const ch=tp&255;tp>>>=8;
+   if(rc==4){for(let k=0;k<ch;k++)put(last);rc=0;last=-1;continue}
+   put(ch);if(ch==last)rc++;else{rc=1;last=ch}
+  }
+ }
+ return out.subarray(0,op);
+}
+//BZ-END
+
+// ---- NEXRAD Level 2 reflectivity (msg 31, REF) -> polar cells [az,range km,elev,dBZ,azWidth,gateKm]
+function parseL2(buf){
+ const u8=new Uint8Array(buf),dv=new DataView(buf),cells=[],s1=[],seen={};let p=24;
+ while(p+4<=u8.length){
+  const sz=Math.abs(dv.getInt32(p));p+=4;if(!sz)break;
+  let d;try{d=bunzip(u8.subarray(p,p+sz))}catch(e){break}p+=sz;
+  const v=new DataView(d.buffer,d.byteOffset,d.byteLength);let o=0;
+  while(o+28<=d.length){
+   const size=v.getUint16(o+12);if(!size)break;
+   if(d[o+15]==31){
+    const m=o+28,az=v.getFloat32(m+12),el=v.getFloat32(m+24),en=d[m+22],nb=v.getUint16(m+30),aw=d[m+20]==1?0.5:1,k=Math.round(el*10);
+    if(seen[k]===undefined)seen[k]=en;          // skip repeated (SAILS/MESO) cuts at same elevation
+    if(seen[k]===en)for(let i=0;i<Math.min(nb,9);i++){
+     const b=m+v.getUint32(m+32+4*i);
+     if(d[b]==68&&d[b+1]==82&&d[b+2]==69&&d[b+3]==70&&d[b+19]==8){
+      const ng=v.getUint16(b+8),f0=v.getUint16(b+10),gs=v.getUint16(b+12)/1000,sc=v.getFloat32(b+20),of=v.getFloat32(b+24);
+      for(let g=0;g<ng;g++){
+       const raw=d[b+28+g];if(raw<2)continue;const dbz=(raw-of)/sc;if(dbz<10)continue;
+       const r=f0/1000+g*gs;cells.push(az,r,el,dbz,aw,gs);if(en==1)s1.push(az,r,dbz,aw,gs);
+      }
+     }
+    }
+    o+=12+size*2;
+   }else o+=2432;
+  }
+ }
+ return {cells:new Float32Array(cells),s1};
+}
+
+const COL=['#04e9e7','#019ff4','#0300f4','#02fd02','#01c501','#008e00','#fdf802','#fd9500','#fd0000','#bc0000','#f800fd','#ffffff'];
+const bin=d=>Math.max(0,Math.min(11,Math.floor((d-15)/5)));
+const $st=$('st'),ppiImg=document.createElement('canvas');ppiImg.width=ppiImg.height=300;
+let user=null,gps='GPS: tap Start AR',sensors=false,abs=false,corr=0,chosen=false,scanKey='',nCells=0,yaw=0,pitch=0;
+let basis={r:[1,0,0],u:[0,0,1],f:[0,1,0]};
+
+// ---- WebGL2: every gate is an instanced polar quad (annular sector), projected in the vertex shader
+const cv=$('ar'),hud=$('hud'),hx=hud.getContext('2d'),pc=$('ppi').getContext('2d');
+const gl=cv.getContext('webgl2',{premultipliedAlpha:true,alpha:true});
+let prog,vao,ibuf,loc={};
+if(gl){
+ const sh=(t,s)=>{const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);if(!gl.getShaderParameter(o,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(o));return o};
+ prog=gl.createProgram();
+ gl.attachShader(prog,sh(gl.VERTEX_SHADER,`#version 300 es
+layout(location=0) in vec2 c; layout(location=1) in vec4 A; layout(location=2) in vec2 Bw;
+uniform vec2 U,S; uniform vec3 R,Up,Fw; out float dbz;
+void main(){
+ float az=radians(A.x+(c.x-.5)*Bw.x), r=A.y+(c.y-.5)*Bw.y, el=radians(A.z);
+ float s=r*cos(el), h=r*sin(el)+r*r/16990.;
+ vec3 p=vec3(s*sin(az)+U.x, s*cos(az)+U.y, 0.);
+ p.z=h-dot(p.xy,p.xy)/12742.;
+ gl_Position=vec4(dot(p,R)*S.x, dot(p,Up)*S.y, 0., dot(p,Fw));
+ dbz=A.w;}`));
+ gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,`#version 300 es
+precision mediump float; in float dbz; uniform vec3 K[12]; out vec4 o;
+void main(){int i=int(clamp(floor((dbz-15.)/5.),0.,11.));o=vec4(K[i]*.62,.62);}`));
+ gl.linkProgram(prog);
+ for(const n of['U','S','R','Up','Fw','K'])loc[n]=gl.getUniformLocation(prog,n);
+ vao=gl.createVertexArray();gl.bindVertexArray(vao);
+ const cb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,cb);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([0,0,1,0,0,1,1,1]),gl.STATIC_DRAW);
+ gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+ ibuf=gl.createBuffer();
+ gl.useProgram(prog);
+ gl.uniform3fv(loc.K,new Float32Array(COL.flatMap(h=>[1,3,5].map(i=>parseInt(h.substr(i,2),16)/255))));
+ gl.enable(gl.BLEND);gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
+}
+function upload(cells){
+ gl.bindVertexArray(vao);gl.bindBuffer(gl.ARRAY_BUFFER,ibuf);gl.bufferData(gl.ARRAY_BUFFER,cells,gl.STATIC_DRAW);
+ gl.enableVertexAttribArray(1);gl.vertexAttribPointer(1,4,gl.FLOAT,false,24,0);gl.vertexAttribDivisor(1,1);
+ gl.enableVertexAttribArray(2);gl.vertexAttribPointer(2,2,gl.FLOAT,false,24,16);gl.vertexAttribDivisor(2,1);
+ nCells=cells.length/6;
+}
+
+async function load(){
+ const id=$('stn').value;$st.textContent='Loading '+id+'…';
+ try{
+  let key;
+  for(let k=0;k<2&&!key;k++){
+   const d=new Date(Date.now()-k*864e5),pad=x=>String(x).padStart(2,'0');
+   const pre=`${d.getUTCFullYear()}/${pad(d.getUTCMonth()+1)}/${pad(d.getUTCDate())}/${id}/`;
+   const x=await(await fetch(B+'?list-type=2&prefix='+pre)).text();
+   const ks=[...x.matchAll(/<Key>([^<]+)<\/Key>/g)].map(m=>m[1]).filter(k=>!k.endsWith('_MDM'));
+   key=ks[ks.length-1];
+  }
+  if(!key)throw new Error('no recent scans');
+  let buf=await(await fetch(B+key)).arrayBuffer();
+  const a=new Uint8Array(buf);
+  if(a[0]==0x1f&&a[1]==0x8b)buf=await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  const {cells,s1}=parseL2(buf);
+  if(gl)upload(cells);
+  // polar PPI minimap: connected annular sectors, one path per color
+  const c=ppiImg.getContext('2d'),sc=150/230,rd=Math.PI/180;c.clearRect(0,0,300,300);
+  for(let b=0;b<12;b++){c.beginPath();
+   for(let i=0;i<s1.length;i+=5){if(bin(s1[i+2])!=b)continue;
+    const a0=(s1[i]-s1[i+3]/2)*rd,a1=(s1[i]+s1[i+3]/2)*rd,r0=(s1[i+1]-s1[i+4]/2)*sc,r1=(s1[i+1]+s1[i+4]/2)*sc;
+    c.moveTo(150+r0*Math.sin(a0),150-r0*Math.cos(a0));c.lineTo(150+r1*Math.sin(a0),150-r1*Math.cos(a0));
+    c.lineTo(150+r1*Math.sin(a1),150-r1*Math.cos(a1));c.lineTo(150+r0*Math.sin(a1),150-r0*Math.cos(a1));c.closePath()}
+   c.fillStyle=COL[b];c.fill()}
+  scanKey=key.split('/').pop();
+ }catch(e){scanKey='';$st.textContent='Error: '+e.message}
+}
+
+// ---- orientation (screen-rotation aware)
+const sa=(a)=>((a+540)%360)-180;
+function onO(e){
+ if(e.type=='deviceorientationabsolute')abs=true;else if(abs)return;
+ if(e.alpha==null)return;sensors=true;
+ const r=Math.PI/180,A=e.alpha*r,Bt=e.beta*r,G=e.gamma*r,cA=Math.cos(A),sA=Math.sin(A),cB=Math.cos(Bt),sB=Math.sin(Bt),cG=Math.cos(G),sG=Math.sin(G);
+ const c0=[cA*cG-sA*sB*sG,cG*sA+cA*sB*sG,-cB*sG],c1=[-cB*sA,cA*cB,sB],c2=[cG*sA*sB+cA*sG,sA*sG-cA*cG*sB,cB*cG];
+ const th=((screen.orientation&&screen.orientation.angle!=null?screen.orientation.angle:window.orientation)||0)*r,ct=Math.cos(th),st=Math.sin(th);
+ const rr=c0.map((x,i)=>x*ct-c1[i]*st),uu=c0.map((x,i)=>x*st+c1[i]*ct),ff=c2.map(x=>-x);
+ basis={r:rr,u:uu,f:ff};
+ if(e.webkitCompassHeading!=null){          // iOS: relative alpha -> align yaw to compass
+  const ref=Math.abs(ff[2])>.7?Math.atan2(c1[0],c1[1]):Math.atan2(ff[0],ff[1]),t=e.webkitCompassHeading-ref/r;
+  corr=corr+sa(t-corr)*.08;
+ }
+}
+let drag=null;
+addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY]});
+addEventListener('pointerup',()=>drag=null);
+addEventListener('pointermove',e=>{if(!drag||sensors)return;yaw+=(e.clientX-drag[0])*.2;pitch=Math.max(-90,Math.min(90,pitch-(e.clientY-drag[1])*.2));drag=[e.clientX,e.clientY];
+ const Y=yaw*Math.PI/180,P=pitch*Math.PI/180,f=[Math.sin(Y)*Math.cos(P),Math.cos(Y)*Math.cos(P),Math.sin(P)],r=[Math.cos(Y),-Math.sin(Y),0];
+ basis={f,r,u:[r[1]*f[2]-r[2]*f[1],r[2]*f[0]-r[0]*f[2],r[0]*f[1]-r[1]*f[0]]}});
+
+// ---- location: must be requested directly inside the tap (iOS)
+function startGeo(){
+ if(!navigator.geolocation){gps='GPS: unsupported';return}
+ gps='GPS: waiting for permission…';
+ navigator.geolocation.watchPosition(p=>{
+  const first=!user;user={lat:p.coords.latitude,lon:p.coords.longitude};gps=`GPS ±${p.coords.accuracy|0} m`;
+  if(first&&!chosen){let b=1e9,bi;for(const k in ST){const d=(ST[k].lat-user.lat)**2+((ST[k].lon-user.lon)*Math.cos(user.lat*Math.PI/180))**2;if(d<b){b=d;bi=k}}
+   if(bi!=$('stn').value){$('stn').value=bi;load()}}
+ },e=>{gps='GPS '+(e.code==1?'denied — enable in Settings › Privacy › Location Services › Safari Websites, or tap 📍':'error: '+e.message)},{enableHighAccuracy:true,maximumAge:10000,timeout:30000});
+}
+$('go').onclick=()=>{
+ startGeo();                                   // no awaits before this
+ try{if(DeviceOrientationEvent.requestPermission)DeviceOrientationEvent.requestPermission().catch(()=>{})}catch(e){}
+ addEventListener('deviceorientationabsolute',onO,true);addEventListener('deviceorientation',onO,true);
+ navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}).then(s=>$('cam').srcObject=s).catch(()=>{});
+ $('go').remove();
+};
+$('loc').onclick=()=>{
+ const v=prompt('Enter "lat,lon" manually, or leave blank to retry GPS:');
+ if(v){const [a,o]=v.split(',').map(Number);if(isFinite(a)&&isFinite(o)){user={lat:a,lon:o};gps='manual location';return}}
+ startGeo();
+};
+$('stn').onchange=()=>{chosen=true;load()};setInterval(load,300000);load();
+
+// ---- render
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+function frame(){
+ const W=innerWidth,H=innerHeight,dpr=Math.min(devicePixelRatio||1,2);
+ if(cv.width!=W*dpr||cv.height!=H*dpr){cv.width=hud.width=W*dpr;cv.height=hud.height=H*dpr}
+ const s=ST[$('stn').value],u=user||s,k=111.19,dN=(s.lat-u.lat)*k,dE=(s.lon-u.lon)*k*Math.cos(u.lat*Math.PI/180);
+ const F=Math.max(W,H)/(2*Math.tan($('fov').value*Math.PI/360));
+ const ya=(corr+ +$('yaw').value)*Math.PI/180,cy=Math.cos(ya),sy=Math.sin(ya),rot=v=>[v[0]*cy+v[1]*sy,-v[0]*sy+v[1]*cy,v[2]];
+ const r=rot(basis.r),up=rot(basis.u),f=rot(basis.f);
+ if(gl&&nCells){
+  gl.viewport(0,0,cv.width,cv.height);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(prog);gl.bindVertexArray(vao);
+  gl.uniform2f(loc.U,dE,dN);gl.uniform2f(loc.S,2*F/W,2*F/H);gl.uniform3fv(loc.R,r);gl.uniform3fv(loc.Up,up);gl.uniform3fv(loc.Fw,f);
+  gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,nCells);
+ }
+ // HUD: cardinals + station marker
+ hx.setTransform(dpr,0,0,dpr,0,0);hx.clearRect(0,0,W,H);hx.font='bold 16px system-ui';hx.textAlign='center';hx.fillStyle='#fff';hx.strokeStyle='#000';hx.lineWidth=3;
+ const pr=v=>{const d=dot(v,f);return d>.001?[W/2+F*dot(v,r)/d,H/2-F*dot(v,up)/d]:null};
+ for(const [t,v] of[['N',[0,1,0]],['E',[1,0,0]],['S',[0,-1,0]],['W',[-1,0,0]]]){const q=pr(v);if(q){hx.strokeText(t,q[0],q[1]);hx.fillText(t,q[0],q[1])}}
+ const q=pr([dE,dN,0]);if(q){hx.lineWidth=2;hx.beginPath();hx.arc(q[0],q[1],10,0,7);hx.stroke();hx.strokeStyle='#fff';hx.stroke();hx.strokeStyle='#000';hx.fillText($('stn').value,q[0],q[1]-16)}
+ const hd=(Math.atan2(f[0],f[1])*180/Math.PI+360)%360,br=(Math.atan2(dE,dN)*180/Math.PI+360)%360;
+ if(scanKey)$st.textContent=`${$('stn').value} ${Math.hypot(dE,dN).toFixed(0)} km @ ${br.toFixed(0)}° · facing ${hd.toFixed(0)}° · tilt ${(Math.asin(f[2])*180/Math.PI).toFixed(0)}° · ${gps} · ${scanKey}${sensors?'':' · drag to look'}`;
+ // polar PPI
+ pc.clearRect(0,0,300,300);pc.drawImage(ppiImg,0,0);
+ pc.strokeStyle='#fff6';pc.lineWidth=1;for(const rr of[50,100,150,200]){pc.beginPath();pc.arc(150,150,rr*150/230,0,7);pc.stroke()}
+ const ux=150-dE*150/230,uy=150+dN*150/230,hf=2*Math.atan(W/(2*F)),a=Math.atan2(f[0],f[1]);
+ pc.fillStyle='#ff08';pc.beginPath();pc.moveTo(ux,uy);pc.arc(ux,uy,60,a-hf/2-Math.PI/2,a+hf/2-Math.PI/2);pc.fill();
+ pc.fillStyle='#ff0';pc.beginPath();pc.arc(ux,uy,4,0,7);pc.fill();
+ pc.fillStyle='#fff';pc.font='14px sans-serif';pc.textAlign='left';pc.fillText('N',143,14);
+ requestAnimationFrame(frame);
+}
+frame();
+</script></body></html>
