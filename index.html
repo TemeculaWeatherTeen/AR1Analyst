@@ -12,7 +12,41 @@
   <canvas id="ar"></canvas>
   <canvas id="hud"></canvas>
   <div id="ui">
-    <select id="stn" aria-label="Radar station"></select>
+    <select id="stn" aria-label="Radar station">
+      <option value="KNKX">KNKX — San Diego, CA</option>
+      <option value="KSOX">KSOX — Santa Ana Mountains, CA</option>
+      <option value="KVTX">KVTX — Los Angeles, CA</option>
+      <option value="KMUX">KMUX — San Francisco Bay Area, CA</option>
+      <option value="KDAX">KDAX — Sacramento, CA</option>
+      <option value="KRTX">KRTX — Portland, OR</option>
+      <option value="KATX">KATX — Seattle, WA</option>
+      <option value="KOTX">KOTX — Spokane, WA</option>
+      <option value="KFSX">KFSX — Flagstaff, AZ</option>
+      <option value="KIWA">KIWA — Phoenix, AZ</option>
+      <option value="KMTX">KMTX — Salt Lake City, UT</option>
+      <option value="KFTG">KFTG — Denver, CO</option>
+      <option value="KABX">KABX — Albuquerque, NM</option>
+      <option value="KEPZ">KEPZ — El Paso, TX</option>
+      <option value="KEWX">KEWX — Austin/San Antonio, TX</option>
+      <option value="KFWS">KFWS — Dallas/Fort Worth, TX</option>
+      <option value="KTLX">KTLX — Oklahoma City, OK</option>
+      <option value="KHGX">KHGX — Houston, TX</option>
+      <option value="KLOT">KLOT — Chicago, IL</option>
+      <option value="KMPX">KMPX — Minneapolis, MN</option>
+      <option value="KDVN">KDVN — Davenport, IA</option>
+      <option value="KEAX">KEAX — Kansas City, MO</option>
+      <option value="KILX">KILX — Lincoln, IL</option>
+      <option value="KDTX">KDTX — Detroit, MI</option>
+      <option value="KCLE">KCLE — Cleveland, OH</option>
+      <option value="KOKX">KOKX — New York City, NY</option>
+      <option value="KDIX">KDIX — Philadelphia, PA</option>
+      <option value="KLWX">KLWX — Washington, DC</option>
+      <option value="KFFC">KFFC — Atlanta, GA</option>
+      <option value="KAMX">KAMX — Miami, FL</option>
+      <option value="KTBW">KTBW — Tampa, FL</option>
+      <option value="KJAX">KJAX — Jacksonville, FL</option>
+      <option value="KBOX">KBOX — Boston, MA</option>
+    </select>
     <button id="go">Start AR</button>
     <button id="loc">📍</button>
     <label>FOV <input id="fov" type="range" min="40" max="90" value="63"></label>
@@ -24,5 +58,22 @@
   </div>
   <div id="st">Pick a station, then Start AR.</div>
   <canvas id="ppi" width="300" height="300"></canvas>
+  <script>
+    // The local catalog keeps the selector usable while the radar script loads.
+    // Avoid duplicate options when the upstream script adds its own station list.
+    const stationSelect = document.getElementById('stn');
+    const stationValues = new Set(Array.from(stationSelect.options, (option) => option.value));
+    new MutationObserver((records) => {
+      for (const record of records) {
+        for (const option of record.addedNodes) {
+          if (option instanceof HTMLOptionElement) {
+            if (stationValues.has(option.value)) option.remove();
+            else stationValues.add(option.value);
+          }
+        }
+      }
+    }).observe(stationSelect, { childList: true });
+    stationSelect.value = 'KNKX';
+  </script>
 </body>
 </html>
