@@ -38,9 +38,9 @@ fetch(originalSource)
       'the compass responsiveness fix'
     );
 
-    // Represent every reflectivity gate as a 3D radar-beam cell. NEXRAD's
-    // nominal beamwidth is about 0.95 degrees; the cell spans that width in
-    // elevation as well as the measured azimuth and range gate dimensions.
+    // Use a 3D mesh for every sampled radar gate. Azimuth width comes from
+    // the scan's sampling mode, range width from the gate spacing, and the
+    // vertical span uses the nominal 0.95-degree NEXRAD beamwidth.
     source = replaceRequired(
       source,
       'layout(location=0) in vec2 c; layout(location=1) in vec4 A; layout(location=2) in vec2 Bw;',
@@ -52,6 +52,15 @@ fetch(originalSource)
       'float az=radians(A.x+(c.x-.5)*Bw.x), r=A.y+(c.y-.5)*Bw.y, el=radians(A.z);',
       'float az=radians(A.x+c.x*Bw.x), r=A.y+c.y*Bw.y, el=radians(A.z+c.z*.95);',
       'the physical beam-volume geometry'
+    );
+    // Height above the radar in a standard 4/3-Earth-refraction model is
+    // range*sin(elevation) + range^2/(2*k*EarthRadius). Do not subtract a
+    // second curvature term: that incorrectly bent the beam below the radar.
+    source = replaceRequired(
+      source,
+      'p.z=h-dot(p.xy,p.xy)/12742.;',
+      'p.z=h;',
+      'the radar beam earth-curvature model'
     );
     source = replaceRequired(
       source,
