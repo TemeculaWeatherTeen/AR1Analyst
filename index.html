@@ -54,7 +54,7 @@
       { id: 'KCLE', name: 'Cleveland, OH', lat: 41.414, lon: -81.860 },
       { id: 'KOKX', name: 'New York City, NY', lat: 40.866, lon: -72.864 },
       { id: 'KDIX', name: 'Philadelphia, PA', lat: 39.947, lon: -74.411 },
-      { id: 'KLWX', name: 'Washington, DC', lat: 38.976, lon: -77..BOGUS },
+      { id: 'KLWX', name: 'Washington, DC', lat: 38.976, lon: -77.477 },
       { id: 'KFFC', name: 'Atlanta, GA', lat: 33.364, lon: -84.566 },
       { id: 'KAMX', name: 'Miami, FL', lat: 25.611, lon: -80.413 },
       { id: 'KTBW', name: 'Tampa, FL', lat: 27.705, lon: -82.402 },
@@ -90,8 +90,12 @@
       window.RADAR_STATIONS = Object.fromEntries(unique.map(({ id, lat, lon }) => [id, { lat, lon }]));
     };
 
+    // Populate immediately so the app always has a usable station even if NOAA
+    // is slow, unavailable, or returns an unexpected inventory response.
+    addStationOptions(fallbackStations);
+
     // NOAA/NWS publishes the active NEXRAD site inventory as paginated GeoJSON.
-    // Keep an offline fallback for startup if the service is unreachable.
+    // Keep the bundled fallback list available for offline startup.
     window.RADAR_STATIONS_READY = (async () => {
       try {
         let next = 'https://api.weather.gov/radar/stations?limit=500';
@@ -110,7 +114,6 @@
         addStationOptions(stations);
       } catch (error) {
         console.warn('Could not load NOAA/NWS radar inventory; using the bundled fallback list.', error);
-        addStationOptions(fallbackStations);
       }
     })();
   </script>
