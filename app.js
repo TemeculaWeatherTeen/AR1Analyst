@@ -41,6 +41,27 @@ fetch(originalSource)
       'the compass responsiveness fix'
     );
 
+    // Collection of Level-II elevations must come from the ray metadata even
+    // when many gates are filtered out by dBZ thresholds below the radar image.
+    source = replaceRequired(
+      source,
+      'function parseL2(buf){\n  const u8=new Uint8Array(buf),dv=new DataView(buf),cells=[],s1=[],seen={};let p=24;',
+      'function parseL2(buf){\n  const u8=new Uint8Array(buf),dv=new DataView(buf),cells=[],s1=[],seen={},tilts=[];let p=24;',
+      'the Level-II tilt metadata collector'
+    );
+    source = replaceRequired(
+      source,
+      'const m=o+28,az=v.getFloat32(m+12),el=v.getFloat32(m+24),en=d[m+22],nb=v.getUint16(m+30),aw=d[m+20]==1?0.5:1,k=Math.round(el*10);',
+      'const m=o+28,az=v.getFloat32(m+12),el=v.getFloat32(m+24),en=d[m+22],nb=v.getUint16(m+30),aw=d[m+20]==1?0.5:1,k=Math.round(el*10);tilts.push(el);',
+      'the Level-II ray elevation capture'
+    );
+    source = replaceRequired(
+      source,
+      'return {cells:new Float32Array(cells),s1};',
+      'return {cells:new Float32Array(cells),s1,tilts:[...new Set(tilts)]};',
+      'the tilt metadata export'
+    );
+
     // Apply the volume changes atomically. If the upstream script changes its
     // WebGL setup in the future, leave its known-good polar quads intact rather
     // than aborting app startup with a partially patched shader/VAO.
@@ -108,15 +129,17 @@ const tiltHost=document.getElementById('tilt-options');
 let activeTilts=new Set(),tiltValues=[],radarCells=new Float32Array(0);
 const tiltKey=angle=>Math.round(angle*10)/10;
 function filterSelectedTilts(cells){
+ if(!cells.length)return new Float32Array(0);
  const selected=[];
- for(let i=0;i<cells.length;i+=6)if(activeTilts.has(tiltKey(cells[i+2])))selected.push(cells.subarray(i,i+6));
+ for(let i=0;i<cells.length;i+=6){
+  if(activeTilts.has(tiltKey(cells[i+2])))selected.push(cells.subarray(i,i+6));
+ }
  return new Float32Array(selected.flatMap(v=>Array.from(v)));
 }
-function setTiltOptions(cells){
- const values=[...new Set(Array.from({length:cells.length/6},(_,i)=>tiltKey(cells[i*6+2])))].sort((a,b)=>a-b);
- if(!values.length)return;
- const changed=values.length!==tiltValues.length||values.some((v,i)=>v!==tiltValues[i]);
- if(!changed)return;
+function setTiltOptions(tilts){
+ if(!tiltHost)return;
+ const values=[...new Set((tilts||[]).map(angle=>tiltKey(angle)))].sort((a,b)=>a-b);
+ if(!values.length){tiltHost.textContent='No scan angles available';return;}
  if(tiltValues.length){activeTilts=new Set(values.filter(v=>activeTilts.has(v)));if(!activeTilts.size)activeTilts=new Set(values)}
  else activeTilts=new Set(values);
  tiltValues=values;
@@ -127,7 +150,7 @@ function setTiltOptions(cells){
   box.addEventListener('change',()=>{
    if(box.checked)activeTilts.add(angle);else activeTilts.delete(angle);
    if(!activeTilts.size){activeTilts=new Set(tiltValues);for(const input of tiltHost.querySelectorAll('input'))input.checked=true}
-   if(gl)upload(filterSelectedTilts(radarCells));
+   if(gl&&radarCells.length)upload(filterSelectedTilts(radarCells));
   });
   label.append(box,document.createTextNode(angle.toFixed(1)+'°'));tiltHost.append(label);
  }
@@ -137,7 +160,7 @@ function setTiltOptions(cells){
     source = replaceRequired(
       source,
       'const {cells,s1}=parseL2(buf);\n   if(gl)upload(cells);',
-      'const {cells,s1}=parseL2(buf);\n   radarCells=cells;setTiltOptions(cells);\n   if(gl)upload(filterSelectedTilts(cells));',
+      'const {cells,s1,tilts}=parseL2(buf);\n   radarCells=cells;setTiltOptions(tilts);\n   if(gl&&cells.length)upload(filterSelectedTilts(cells));',
       'elevation selection in the radar scan'
     );
 
