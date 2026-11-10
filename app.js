@@ -29,8 +29,20 @@ fetch(originalSource)
       throw new Error('Could not apply the iPad screen-orientation fix.');
     }
 
+    const oldCompassSmoothing = 'corr=corr+sa(t-corr)*.08;';
+    const fasterCompassSmoothing = 'corr=corr+sa(t-corr)*.35;';
+    if (!originalScript.textContent.includes(oldCompassSmoothing)) {
+      throw new Error('Could not apply the compass responsiveness fix.');
+    }
+
+    const updatedSource = originalScript.textContent
+      .replace(oldScreenAngle, screenAngleFix)
+      // The old 0.08 correction factor visibly lagged behind iPad rotation.
+      // Increase it while retaining circular smoothing to avoid heading jumps.
+      .replace(oldCompassSmoothing, fasterCompassSmoothing);
+
     const script = document.createElement('script');
-    script.textContent = originalScript.textContent.replace(oldScreenAngle, screenAngleFix);
+    script.textContent = updatedSource;
     document.body.appendChild(script);
   })
   .catch((error) => {
