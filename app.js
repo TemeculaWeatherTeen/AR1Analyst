@@ -17,8 +17,20 @@ fetch(originalSource)
     const originalScript = originalDocument.querySelector('script');
     if (!originalScript) throw new Error('Radar application script was not found.');
 
+    // iPad Safari can expose a stale Screen Orientation angle in landscape.
+    // When iOS provides its legacy orientation value, use it to rotate the
+    // sensor axes into the screen's coordinate system (matching the compass
+    // heading events used below).
+    const oldScreenAngle =
+      'const th=((screen.orientation&&screen.orientation.angle!=null?screen.orientation.angle:window.orientation)||0)*r,ct=Math.cos(th),st=Math.sin(th);';
+    const screenAngleFix =
+      "const angle=e.webkitCompassHeading!=null&&typeof window.orientation==='number'?window.orientation:(screen.orientation&&screen.orientation.angle!=null?screen.orientation.angle:window.orientation),th=(angle==null?0:angle)*r,ct=Math.cos(th),st=Math.sin(th);";
+    if (!originalScript.textContent.includes(oldScreenAngle)) {
+      throw new Error('Could not apply the iPad screen-orientation fix.');
+    }
+
     const script = document.createElement('script');
-    script.textContent = originalScript.textContent;
+    script.textContent = originalScript.textContent.replace(oldScreenAngle, screenAngleFix);
     document.body.appendChild(script);
   })
   .catch((error) => {
