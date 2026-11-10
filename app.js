@@ -1,7 +1,6 @@
 /*
- * The original radar application remains at this immutable source revision.
- * This loader applies the AR/iPad fixes and adds user-selectable elevation
- * tilts plus 3D radar-beam sample volumes before running its script.
+ * Load the pinned radar application, then add device-orientation fixes,
+ * selectable Level-II elevation cuts, and a 3D sampled-beam mesh.
  */
 const originalSource =
   'https://raw.githubusercontent.com/TemeculaWeatherTeen/AR1Analyst/3659f88840c59743b65feacaca944bc0bc965364/index.html';
@@ -20,11 +19,15 @@ fetch(originalSource)
       if (!source.includes(before)) throw new Error(`Could not apply ${label}.`);
       return source.replace(before, after);
     };
+    const replacePattern = (source, pattern, after, label) => {
+      if (!pattern.test(source)) throw new Error(`Could not apply ${label}.`);
+      return source.replace(pattern, after);
+    };
 
     let source = originalScript.textContent;
 
-    // Keep iPad Safari's sensor axes aligned to the screen and respond promptly
-    // to compass corrections.
+    // Keep iPad Safari's sensor axes aligned with screen rotation and let
+    // compass corrections converge more quickly.
     source = replaceRequired(
       source,
       'const th=((screen.orientation&&screen.orientation.angle!=null?screen.orientation.angle:window.orientation)||0)*r,ct=Math.cos(th),st=Math.sin(th);',
@@ -38,34 +41,36 @@ fetch(originalSource)
       'the compass responsiveness fix'
     );
 
-    // Use a 3D mesh for every sampled radar gate. Azimuth width comes from
-    // the scan's sampling mode, range width from the gate spacing, and the
-    // vertical span uses the nominal 0.95-degree NEXRAD beamwidth.
-    source = replaceRequired(
-      source,
-      'layout(location=0) in vec2 c; layout(location=1) in vec4 A; layout(location=2) in vec2 Bw;',
-      'layout(location=0) in vec3 c; layout(location=1) in vec4 A; layout(location=2) in vec2 Bw;',
-      'the 3D radar-beam vertex format'
-    );
-    source = replaceRequired(
-      source,
-      'float az=radians(A.x+(c.x-.5)*Bw.x), r=A.y+(c.y-.5)*Bw.y, el=radians(A.z);',
-      'float az=radians(A.x+c.x*Bw.x), r=A.y+c.y*Bw.y, el=radians(A.z+c.z*.95);',
-      'the physical beam-volume geometry'
-    );
-    // Height above the radar in a standard 4/3-Earth-refraction model is
-    // range*sin(elevation) + range^2/(2*k*EarthRadius). Do not subtract a
-    // second curvature term: that incorrectly bent the beam below the radar.
-    source = replaceRequired(
-      source,
-      'p.z=h-dot(p.xy,p.xy)/12742.;',
-      'p.z=h;',
-      'the radar beam earth-curvature model'
-    );
-    source = replaceRequired(
-      source,
-      'const cb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,cb);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([0,0,1,0,0,1,1,1]),gl.STATIC_DRAW);\n  gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);',
-      `const cb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,cb);
+    // Apply the volume changes atomically. If the upstream script changes its
+    // WebGL setup in the future, leave its known-good polar quads intact rather
+    // than aborting app startup with a partially patched shader/VAO.
+    try {
+      let volumeSource = source;
+      volumeSource = replaceRequired(
+        volumeSource,
+        'layout(location=0) in vec2 c; layout(location=1) in vec4 A; layout(location=2) in vec2 Bw;',
+        'layout(location=0) in vec3 c; layout(location=1) in vec4 A; layout(location=2) in vec2 Bw;',
+        'the 3D radar-beam vertex format'
+      );
+      volumeSource = replaceRequired(
+        volumeSource,
+        'float az=radians(A.x+(c.x-.5)*Bw.x), r=A.y+(c.y-.5)*Bw.y, el=radians(A.z);',
+        'float az=radians(A.x+c.x*Bw.x), r=A.y+c.y*Bw.y, el=radians(A.z+c.z*.95);',
+        'the physical beam-volume geometry'
+      );
+      // NEXRAD beam height uses the 4/3-Earth effective radius: r*sin(el) +
+      // r²/(2*k*R). The old second correction used the radar's absolute
+      // translated position and bent beams incorrectly when away from origin.
+      volumeSource = replaceRequired(
+        volumeSource,
+        'p.z=h-dot(p.xy,p.xy)/12742.;',
+        'p.z=h;',
+        'the radar beam earth-curvature model'
+      );
+      volumeSource = replacePattern(
+        volumeSource,
+        /const cb=gl\.createBuffer\(\);gl\.bindBuffer\(gl\.ARRAY_BUFFER,cb\);gl\.bufferData\(gl\.ARRAY_BUFFER,new Float32Array\(\[0,0,1,0,0,1,1,1\]\),gl\.STATIC_DRAW\);\s*gl\.enableVertexAttribArray\(0\);gl\.vertexAttribPointer\(0,2,gl\.FLOAT,false,0,0\);/,
+        `const cb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,cb);
   const cubeFaces=[
    [[-.5,-.5,-.5],[.5,-.5,-.5],[.5,.5,-.5],[-.5,-.5,-.5],[.5,.5,-.5],[-.5,.5,-.5]],
    [[-.5,-.5,.5],[.5,.5,.5],[.5,-.5,.5],[-.5,-.5,.5],[-.5,.5,.5],[.5,.5,.5]],
@@ -76,34 +81,39 @@ fetch(originalSource)
   ];
   gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(cubeFaces.flat()),gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,0,0);`,
-      'the 3D beam-cell mesh'
-    );
-    source = replaceRequired(
-      source,
-      'gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,nCells);',
-      'gl.drawArraysInstanced(gl.TRIANGLES,0,36,nCells);',
-      'the 3D beam-cell draw call'
-    );
-    source = replaceRequired(
-      source,
-      'o=vec4(K[i]*.62,.62);',
-      'o=vec4(K[i]*.24,.24);',
-      'the translucent beam-cell rendering'
-    );
+        'the 3D beam-cell mesh'
+      );
+      volumeSource = replaceRequired(
+        volumeSource,
+        'gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,nCells);',
+        'gl.drawArraysInstanced(gl.TRIANGLES,0,36,nCells);',
+        'the 3D beam-cell draw call'
+      );
+      volumeSource = replaceRequired(
+        volumeSource,
+        'o=vec4(K[i]*.62,.62);',
+        'o=vec4(K[i]*.24,.24);',
+        'the translucent beam-cell rendering'
+      );
+      source = volumeSource;
+    } catch (error) {
+      console.warn('3D beam mesh unavailable; using the original polar-cell renderer.', error);
+    }
 
-    // Add a multiple-choice tilt selector backed by the elevation angles in
-    // the Level-II scan. The default is all available tilts; changing a box
-    // immediately re-uploads only those elevation sweeps.
+    // Elevations come from the actual Level-II ray metadata. The checkbox
+    // values are only rounded for display/matching; the shader still uses each
+    // cell's original measured elevation for its beam geometry.
     const tiltCode = `
 const tiltHost=document.getElementById('tilt-options');
 let activeTilts=new Set(),tiltValues=[],radarCells=new Float32Array(0);
+const tiltKey=angle=>Math.round(angle*10)/10;
 function filterSelectedTilts(cells){
  const selected=[];
- for(let i=0;i<cells.length;i+=6)if(activeTilts.has(Math.round(cells[i+2]*10)/10))selected.push(cells.subarray(i,i+6));
+ for(let i=0;i<cells.length;i+=6)if(activeTilts.has(tiltKey(cells[i+2])))selected.push(cells.subarray(i,i+6));
  return new Float32Array(selected.flatMap(v=>Array.from(v)));
 }
 function setTiltOptions(cells){
- const values=[...new Set(Array.from({length:cells.length/6},(_,i)=>Math.round(cells[i*6+2]*10)/10))].sort((a,b)=>a-b);
+ const values=[...new Set(Array.from({length:cells.length/6},(_,i)=>tiltKey(cells[i*6+2])))].sort((a,b)=>a-b);
  if(!values.length)return;
  const changed=values.length!==tiltValues.length||values.some((v,i)=>v!==tiltValues[i]);
  if(!changed)return;
