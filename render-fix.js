@@ -1,18 +1,21 @@
 /*
- * The 3D volume renderer uses standard (non-premultiplied) WebGL blending.
- * Keep radar colors unscaled and use alpha only for translucency; scaling both
- * the RGB values and alpha makes the volume nearly invisible after blending.
+ * The sampled 3D beam volumes were made almost invisible by the reduced
+ * fragment color/alpha. Keep the NEXRAD colors intact and use a high alpha so
+ * overlapping beam cells remain visible over the camera feed on iPad Safari.
  */
 (() => {
   const prototype = window.WebGL2RenderingContext?.prototype;
-  if (!prototype) return;
+  if (!prototype) {
+    console.warn('3D radar renderer: WebGL2 is not available.');
+    return;
+  }
 
   const originalShaderSource = prototype.shaderSource;
   prototype.shaderSource = function (shader, source) {
     if (typeof source === 'string') {
       source = source.replace(
         'o=vec4(K[i]*.24,.24);',
-        'o=vec4(K[i],.32);'
+        'o=vec4(K[i],.78);'
       );
     }
     return originalShaderSource.call(this, shader, source);
