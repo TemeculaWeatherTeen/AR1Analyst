@@ -26,101 +26,93 @@
   <canvas id="ppi" width="300" height="300"></canvas>
   <script>
     const stationSelect = document.getElementById('stn');
-    const stationValues = new Set();
     const fallbackStations = [
-      { id: 'KNKX', name: 'San Diego, CA' },
-      { id: 'KSOX', name: 'Santa Ana Mountains, CA' },
-      { id: 'KVTX', name: 'Los Angeles, CA' },
-      { id: 'KMUX', name: 'San Francisco Bay Area, CA' },
-      { id: 'KDAX', name: 'Sacramento, CA' },
-      { id: 'KRTX', name: 'Portland, OR' },
-      { id: 'KATX', name: 'Seattle, WA' },
-      { id: 'KOTX', name: 'Spokane, WA' },
-      { id: 'KFSX', name: 'Flagstaff, AZ' },
-      { id: 'KIWA', name: 'Phoenix, AZ' },
-      { id: 'KMTX', name: 'Salt Lake City, UT' },
-      { id: 'KFTG', name: 'Denver, CO' },
-      { id: 'KABX', name: 'Albuquerque, NM' },
-      { id: 'KEPZ', name: 'El Paso, TX' },
-      { id: 'KEWX', name: 'Austin/San Antonio, TX' },
-      { id: 'KFWS', name: 'Dallas/Fort Worth, TX' },
-      { id: 'KTLX', name: 'Oklahoma City, OK' },
-      { id: 'KHGX', name: 'Houston, TX' },
-      { id: 'KLOT', name: 'Chicago, IL' },
-      { id: 'KMPX', name: 'Minneapolis, MN' },
-      { id: 'KDVN', name: 'Davenport, IA' },
-      { id: 'KEAX', name: 'Kansas City, MO' },
-      { id: 'KILX', name: 'Lincoln, IL' },
-      { id: 'KDTX', name: 'Detroit, MI' },
-      { id: 'KCLE', name: 'Cleveland, OH' },
-      { id: 'KOKX', name: 'New York City, NY' },
-      { id: 'KDIX', name: 'Philadelphia, PA' },
-      { id: 'KLWX', name: 'Washington, DC' },
-      { id: 'KFFC', name: 'Atlanta, GA' },
-      { id: 'KAMX', name: 'Miami, FL' },
-      { id: 'KTBW', name: 'Tampa, FL' },
-      { id: 'KJAX', name: 'Jacksonville, FL' },
-      { id: 'KBOX', name: 'Boston, MA' }
+      { id: 'KNKX', name: 'San Diego, CA', lat: 32.919, lon: -117.042 },
+      { id: 'KSOX', name: 'Santa Ana Mountains, CA', lat: 33.818, lon: -117.636 },
+      { id: 'KVTX', name: 'Los Angeles, CA', lat: 34.412, lon: -119.179 },
+      { id: 'KMUX', name: 'San Francisco Bay Area, CA', lat: 37.155, lon: -121.898 },
+      { id: 'KDAX', name: 'Sacramento, CA', lat: 38.501, lon: -121.678 },
+      { id: 'KRTX', name: 'Portland, OR', lat: 45.715, lon: -122.965 },
+      { id: 'KATX', name: 'Seattle, WA', lat: 48.195, lon: -122.496 },
+      { id: 'KOTX', name: 'Spokane, WA', lat: 47.680, lon: -117.627 },
+      { id: 'KFSX', name: 'Flagstaff, AZ', lat: 34.574, lon: -111.198 },
+      { id: 'KIWA', name: 'Phoenix, AZ', lat: 33.289, lon: -111.669 },
+      { id: 'KMTX', name: 'Salt Lake City, UT', lat: 40.700, lon: -111.900 },
+      { id: 'KFTG', name: 'Denver, CO', lat: 39.786, lon: -104.545 },
+      { id: 'KABX', name: 'Albuquerque, NM', lat: 35.150, lon: -106.824 },
+      { id: 'KEPZ', name: 'El Paso, TX', lat: 31.874, lon: -106.698 },
+      { id: 'KEWX', name: 'Austin/San Antonio, TX', lat: 29.704, lon: -98.028 },
+      { id: 'KFWS', name: 'Dallas/Fort Worth, TX', lat: 32.573, lon: -97.303 },
+      { id: 'KTLX', name: 'Oklahoma City, OK', lat: 35.333, lon: -97.278 },
+      { id: 'KHGX', name: 'Houston, TX', lat: 29.472, lon: -95.079 },
+      { id: 'KLOT', name: 'Chicago, IL', lat: 41.604, lon: -88.085 },
+      { id: 'KMPX', name: 'Minneapolis, MN', lat: 44.849, lon: -93.565 },
+      { id: 'KDVN', name: 'Davenport, IA', lat: 41.612, lon: -90.581 },
+      { id: 'KEAX', name: 'Kansas City, MO', lat: 38.810, lon: -94.264 },
+      { id: 'KILX', name: 'Lincoln, IL', lat: 40.151, lon: -89.336 },
+      { id: 'KDTX', name: 'Detroit, MI', lat: 42.700, lon: -83.472 },
+      { id: 'KCLE', name: 'Cleveland, OH', lat: 41.414, lon: -81.860 },
+      { id: 'KOKX', name: 'New York City, NY', lat: 40.866, lon: -72.864 },
+      { id: 'KDIX', name: 'Philadelphia, PA', lat: 39.947, lon: -74.411 },
+      { id: 'KLWX', name: 'Washington, DC', lat: 38.976, lon: -77..BOGUS },
+      { id: 'KFFC', name: 'Atlanta, GA', lat: 33.364, lon: -84.566 },
+      { id: 'KAMX', name: 'Miami, FL', lat: 25.611, lon: -80.413 },
+      { id: 'KTBW', name: 'Tampa, FL', lat: 27.705, lon: -82.402 },
+      { id: 'KJAX', name: 'Jacksonville, FL', lat: 30.484, lon: -81.702 },
+      { id: 'KBOX', name: 'Boston, MA', lat: 41.956, lon: -71.138 }
     ];
 
-    const addStationOptions = (stationList) => {
-      stationSelect.replaceChildren();
-      stationValues.clear();
-      for (const station of stationList) {
-        if (!station || !station.id) continue;
-        const value = String(station.id).trim();
-        if (!value || stationValues.has(value)) continue;
-        stationValues.add(value);
-        const option = new Option(`${value} — ${station.name || 'Radar station'}`, value);
-        stationSelect.add(option);
-      }
-      if (!stationSelect.value && stationSelect.options.length) {
-        stationSelect.value = stationSelect.options[0].value;
-      }
+    const normalizeRadarFeatures = (data) => {
+      const features = Array.isArray(data?.features) ? data.features : [];
+      return features.map((feature) => {
+        const properties = feature?.properties || {};
+        const id = String(properties.stationIdentifier || properties.STATION_ID || properties.id || '').trim().toUpperCase();
+        const coordinates = feature?.geometry?.coordinates || [];
+        const lat = Number(properties.latitude ?? properties.LATITUDE ?? coordinates[1]);
+        const lon = Number(properties.longitude ?? properties.LONGITUDE ?? coordinates[0]);
+        const name = String(properties.name || properties.STATION_NAME || id).trim();
+        const radarType = String(properties.type || properties.radarType || '').toUpperCase();
+        if (!/^[A-Z0-9]{4}$/.test(id) || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        if (radarType && !radarType.includes('WSR-88D') && !radarType.includes('NEXRAD')) return null;
+        return { id, name, lat, lon };
+      }).filter(Boolean);
     };
 
-    const loadRadarStationArchive = async () => {
-      const archiveUrl = 'https://www.ncdc.noaa.gov/cdo-web/services/cdo/nexrad/MapServer/0/query?where=1%3D1&outFields=STATION_ID,STATION_NAME,LATITUDE,LONGITUDE&f=geojson';
+    const addStationOptions = (stations) => {
+      const previous = stationSelect.value || 'KNKX';
+      const unique = [...new Map(stations.map((station) => [station.id, station])).values()]
+        .sort((a, b) => a.id.localeCompare(b.id));
+      stationSelect.replaceChildren(...unique.map((station) =>
+        new Option(`${station.id} — ${station.name}`, station.id)));
+      stationSelect.value = unique.some((station) => station.id === previous)
+        ? previous
+        : (unique.some((station) => station.id === 'KNKX') ? 'KNKX' : (unique[0]?.id || ''));
+      window.RADAR_STATIONS = Object.fromEntries(unique.map(({ id, lat, lon }) => [id, { lat, lon }]));
+    };
+
+    // NOAA/NWS publishes the active NEXRAD site inventory as paginated GeoJSON.
+    // Keep an offline fallback for startup if the service is unreachable.
+    window.RADAR_STATIONS_READY = (async () => {
       try {
-        const response = await fetch(archiveUrl, { mode: 'cors' });
-        if (!response.ok) throw new Error(`Station archive request failed (${response.status})`);
-        const data = await response.json();
-        const stations = (data.features || [])
-          .map((feature) => {
-            const props = feature?.properties || {};
-            const id = String(props.STATION_ID || '').trim();
-            const name = String(props.STATION_NAME || '').trim();
-            const lat = Number(props.LATITUDE);
-            const lon = Number(props.LONGITUDE);
-            if (!id || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-            return { id, name: name || `${id} radar station`, lat, lon };
-          })
-          .filter(Boolean)
-          .sort((a, b) => a.id.localeCompare(b.id));
-        if (stations.length) {
-          addStationOptions(stations);
-          stationSelect.value = stationSelect.value || 'KNKX';
-          return;
+        let next = 'https://api.weather.gov/radar/stations?limit=500';
+        const stations = [];
+        const visited = new Set();
+        while (next && !visited.has(next)) {
+          visited.add(next);
+          const response = await fetch(next, { headers: { Accept: 'application/geo+json, application/json' } });
+          if (!response.ok) throw new Error(`NOAA station archive returned ${response.status}`);
+          const data = await response.json();
+          stations.push(...normalizeRadarFeatures(data));
+          next = data.pagination?.next || data['@graph']?.next || null;
+          if (typeof next === 'string' && next.startsWith('/')) next = `https://api.weather.gov${next}`;
         }
+        if (!stations.length) throw new Error('The station archive returned no usable radar sites.');
+        addStationOptions(stations);
       } catch (error) {
-        console.warn('Could not load NOAA radar archive; using fallback station list.', error);
+        console.warn('Could not load NOAA/NWS radar inventory; using the bundled fallback list.', error);
+        addStationOptions(fallbackStations);
       }
-      addStationOptions(fallbackStations);
-      stationSelect.value = 'KNKX';
-    };
-
-    new MutationObserver((records) => {
-      for (const record of records) {
-        for (const option of record.addedNodes) {
-          if (!(option instanceof HTMLOptionElement)) continue;
-          if (stationValues.has(option.value)) option.remove();
-          else stationValues.add(option.value);
-        }
-      }
-    }).observe(stationSelect, { childList: true });
-
-    loadRadarStationArchive();
-    stationSelect.value = 'KNKX';
+    })();
   </script>
 </body>
 </html>
