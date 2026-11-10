@@ -12,41 +12,7 @@
   <canvas id="ar"></canvas>
   <canvas id="hud"></canvas>
   <div id="ui">
-    <select id="stn" aria-label="Radar station">
-      <option value="KNKX">KNKX — San Diego, CA</option>
-      <option value="KSOX">KSOX — Santa Ana Mountains, CA</option>
-      <option value="KVTX">KVTX — Los Angeles, CA</option>
-      <option value="KMUX">KMUX — San Francisco Bay Area, CA</option>
-      <option value="KDAX">KDAX — Sacramento, CA</option>
-      <option value="KRTX">KRTX — Portland, OR</option>
-      <option value="KATX">KATX — Seattle, WA</option>
-      <option value="KOTX">KOTX — Spokane, WA</option>
-      <option value="KFSX">KFSX — Flagstaff, AZ</option>
-      <option value="KIWA">KIWA — Phoenix, AZ</option>
-      <option value="KMTX">KMTX — Salt Lake City, UT</option>
-      <option value="KFTG">KFTG — Denver, CO</option>
-      <option value="KABX">KABX — Albuquerque, NM</option>
-      <option value="KEPZ">KEPZ — El Paso, TX</option>
-      <option value="KEWX">KEWX — Austin/San Antonio, TX</option>
-      <option value="KFWS">KFWS — Dallas/Fort Worth, TX</option>
-      <option value="KTLX">KTLX — Oklahoma City, OK</option>
-      <option value="KHGX">KHGX — Houston, TX</option>
-      <option value="KLOT">KLOT — Chicago, IL</option>
-      <option value="KMPX">KMPX — Minneapolis, MN</option>
-      <option value="KDVN">KDVN — Davenport, IA</option>
-      <option value="KEAX">KEAX — Kansas City, MO</option>
-      <option value="KILX">KILX — Lincoln, IL</option>
-      <option value="KDTX">KDTX — Detroit, MI</option>
-      <option value="KCLE">KCLE — Cleveland, OH</option>
-      <option value="KOKX">KOKX — New York City, NY</option>
-      <option value="KDIX">KDIX — Philadelphia, PA</option>
-      <option value="KLWX">KLWX — Washington, DC</option>
-      <option value="KFFC">KFFC — Atlanta, GA</option>
-      <option value="KAMX">KAMX — Miami, FL</option>
-      <option value="KTBW">KTBW — Tampa, FL</option>
-      <option value="KJAX">KJAX — Jacksonville, FL</option>
-      <option value="KBOX">KBOX — Boston, MA</option>
-    </select>
+    <select id="stn" aria-label="Radar station"></select>
     <button id="go">Start AR</button>
     <button id="loc">📍</button>
     <label>FOV <input id="fov" type="range" min="40" max="90" value="63"></label>
@@ -59,20 +25,101 @@
   <div id="st">Pick a station, then Start AR.</div>
   <canvas id="ppi" width="300" height="300"></canvas>
   <script>
-    // The local catalog keeps the selector usable while the radar script loads.
-    // Avoid duplicate options when the upstream script adds its own station list.
     const stationSelect = document.getElementById('stn');
-    const stationValues = new Set(Array.from(stationSelect.options, (option) => option.value));
+    const stationValues = new Set();
+    const fallbackStations = [
+      { id: 'KNKX', name: 'San Diego, CA' },
+      { id: 'KSOX', name: 'Santa Ana Mountains, CA' },
+      { id: 'KVTX', name: 'Los Angeles, CA' },
+      { id: 'KMUX', name: 'San Francisco Bay Area, CA' },
+      { id: 'KDAX', name: 'Sacramento, CA' },
+      { id: 'KRTX', name: 'Portland, OR' },
+      { id: 'KATX', name: 'Seattle, WA' },
+      { id: 'KOTX', name: 'Spokane, WA' },
+      { id: 'KFSX', name: 'Flagstaff, AZ' },
+      { id: 'KIWA', name: 'Phoenix, AZ' },
+      { id: 'KMTX', name: 'Salt Lake City, UT' },
+      { id: 'KFTG', name: 'Denver, CO' },
+      { id: 'KABX', name: 'Albuquerque, NM' },
+      { id: 'KEPZ', name: 'El Paso, TX' },
+      { id: 'KEWX', name: 'Austin/San Antonio, TX' },
+      { id: 'KFWS', name: 'Dallas/Fort Worth, TX' },
+      { id: 'KTLX', name: 'Oklahoma City, OK' },
+      { id: 'KHGX', name: 'Houston, TX' },
+      { id: 'KLOT', name: 'Chicago, IL' },
+      { id: 'KMPX', name: 'Minneapolis, MN' },
+      { id: 'KDVN', name: 'Davenport, IA' },
+      { id: 'KEAX', name: 'Kansas City, MO' },
+      { id: 'KILX', name: 'Lincoln, IL' },
+      { id: 'KDTX', name: 'Detroit, MI' },
+      { id: 'KCLE', name: 'Cleveland, OH' },
+      { id: 'KOKX', name: 'New York City, NY' },
+      { id: 'KDIX', name: 'Philadelphia, PA' },
+      { id: 'KLWX', name: 'Washington, DC' },
+      { id: 'KFFC', name: 'Atlanta, GA' },
+      { id: 'KAMX', name: 'Miami, FL' },
+      { id: 'KTBW', name: 'Tampa, FL' },
+      { id: 'KJAX', name: 'Jacksonville, FL' },
+      { id: 'KBOX', name: 'Boston, MA' }
+    ];
+
+    const addStationOptions = (stationList) => {
+      stationSelect.replaceChildren();
+      stationValues.clear();
+      for (const station of stationList) {
+        if (!station || !station.id) continue;
+        const value = String(station.id).trim();
+        if (!value || stationValues.has(value)) continue;
+        stationValues.add(value);
+        const option = new Option(`${value} — ${station.name || 'Radar station'}`, value);
+        stationSelect.add(option);
+      }
+      if (!stationSelect.value && stationSelect.options.length) {
+        stationSelect.value = stationSelect.options[0].value;
+      }
+    };
+
+    const loadRadarStationArchive = async () => {
+      const archiveUrl = 'https://www.ncdc.noaa.gov/cdo-web/services/cdo/nexrad/MapServer/0/query?where=1%3D1&outFields=STATION_ID,STATION_NAME,LATITUDE,LONGITUDE&f=geojson';
+      try {
+        const response = await fetch(archiveUrl, { mode: 'cors' });
+        if (!response.ok) throw new Error(`Station archive request failed (${response.status})`);
+        const data = await response.json();
+        const stations = (data.features || [])
+          .map((feature) => {
+            const props = feature?.properties || {};
+            const id = String(props.STATION_ID || '').trim();
+            const name = String(props.STATION_NAME || '').trim();
+            const lat = Number(props.LATITUDE);
+            const lon = Number(props.LONGITUDE);
+            if (!id || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+            return { id, name: name || `${id} radar station`, lat, lon };
+          })
+          .filter(Boolean)
+          .sort((a, b) => a.id.localeCompare(b.id));
+        if (stations.length) {
+          addStationOptions(stations);
+          stationSelect.value = stationSelect.value || 'KNKX';
+          return;
+        }
+      } catch (error) {
+        console.warn('Could not load NOAA radar archive; using fallback station list.', error);
+      }
+      addStationOptions(fallbackStations);
+      stationSelect.value = 'KNKX';
+    };
+
     new MutationObserver((records) => {
       for (const record of records) {
         for (const option of record.addedNodes) {
-          if (option instanceof HTMLOptionElement) {
-            if (stationValues.has(option.value)) option.remove();
-            else stationValues.add(option.value);
-          }
+          if (!(option instanceof HTMLOptionElement)) continue;
+          if (stationValues.has(option.value)) option.remove();
+          else stationValues.add(option.value);
         }
       }
     }).observe(stationSelect, { childList: true });
+
+    loadRadarStationArchive();
     stationSelect.value = 'KNKX';
   </script>
 </body>
