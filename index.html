@@ -16,7 +16,7 @@ select,button{font:inherit;padding:6px 10px;border-radius:8px;border:0}
 <div id="ui">
  <select id="stn" aria-label="Radar station"></select>
  <button id="go">Start AR</button>
- <button id="loc">📍</button><label>FOV <input id="fov" type="range" min="40" max="90" value="63"></label><label>Yaw <input id="yaw" type="range" min="-180" max="180" value="0"></label>
+ <button id="loc">📍</button><button id="cal">🧭 Cal</button><label>Tilt <select id="tilt"><option value="-1">All tilts</option></select></label><label>FOV <input id="fov" type="range" min="30" max="90" value="63"></label><label>Yaw <input id="yaw" type="range" min="-180" max="180" value="0"></label>
 </div>
 <div id="st">Pick a station, then Start AR.</div>
 <canvas id="ppi" width="300" height="300"></canvas>
@@ -78,7 +78,7 @@ function bunzip(src){
 
 // ---- NEXRAD Level 2 reflectivity (msg 31, REF) -> polar cells [az,range km,elev,dBZ,azWidth,gateKm]
 function parseL2(buf){
- const u8=new Uint8Array(buf),dv=new DataView(buf),cells=[],s1=[],seen={};let p=24;
+ const u8=new Uint8Array(buf),dv=new DataView(buf),by={},seen={},ec={};let p=24;
  while(p+4<=u8.length){
   const sz=Math.abs(dv.getInt32(p));p+=4;if(!sz)break;
   let d;try{d=bunzip(u8.subarray(p,p+sz))}catch(e){break}p+=sz;
@@ -91,10 +91,11 @@ function parseL2(buf){
     if(seen[k]===en)for(let i=0;i<Math.min(nb,9);i++){
      const b=m+v.getUint32(m+32+4*i);
      if(d[b]==68&&d[b+1]==82&&d[b+2]==69&&d[b+3]==70&&d[b+19]==8){
+      const e1=ec[en]||(ec[en]={s:0,n:0});e1.s+=el;e1.n++;
       const ng=v.getUint16(b+8),f0=v.getUint16(b+10),gs=v.getUint16(b+12)/1000,sc=v.getFloat32(b+20),of=v.getFloat32(b+24);
       for(let g=0;g<ng;g++){
        const raw=d[b+28+g];if(raw<2)continue;const dbz=(raw-of)/sc;if(dbz<10)continue;
-       const r=f0/1000+g*gs;cells.push(az,r,el,dbz,aw,gs);if(en==1)s1.push(az,r,dbz,aw,gs);
+       (by[en]||(by[en]=[])).push(az,f0/1000+g*gs,0,dbz,aw,gs);
       }
      }
     }
@@ -102,7 +103,10 @@ function parseL2(buf){
    }else o+=2432;
   }
  }
- return {cells:new Float32Array(cells),s1};
+ const ens=Object.keys(ec).sort((a,b)=>ec[a].s/ec[a].n-ec[b].s/ec[b].n),out=[],tilts=[];
+ for(const en of ens){const el=ec[en].s/ec[en].n,a=by[en]||[],start=out.length/6;
+  for(let q=0;q<a.length;q++)out.push(q%6==2?el:a[q]);tilts.push({el,start,n:a.length/6})}   // one exact elevation per cut -> clean cone
+ return {cells:new Float32Array(out),tilts};
 }
 
 const COL=['#04e9e7','#019ff4','#0300f4','#02fd02','#01c501','#008e00','#fdf802','#fd9500','#fd0000','#bc0000','#f800fd','#ffffff'];
@@ -120,8 +124,9 @@ if(gl){
  prog=gl.createProgram();
  gl.attachShader(prog,sh(gl.VERTEX_SHADER,`#version 300 es
 layout(location=0) in vec2 c; layout(location=1) in vec4 A; layout(location=2) in vec2 Bw;
-uniform vec2 U,S; uniform vec3 R,Up,Fw; out float dbz;
+uniform vec2 U,S; uniform vec3 R,Up,Fw; uniform float T; out float dbz;
 void main(){
+ if(T>=0.&&abs(A.z-T)>.06){gl_Position=vec4(2.,2.,2.,1.);return;}
  float az=radians(A.x+(c.x-.5)*Bw.x), r=A.y+(c.y-.5)*Bw.y, el=radians(A.z);
  float s=r*cos(el), h=r*sin(el)+r*r/16990.;
  vec3 p=vec3(s*sin(az)+U.x, s*cos(az)+U.y, 0.);
@@ -132,7 +137,7 @@ void main(){
 precision mediump float; in float dbz; uniform vec3 K[12]; out vec4 o;
 void main(){int i=int(clamp(floor((dbz-15.)/5.),0.,11.));o=vec4(K[i]*.62,.62);}`));
  gl.linkProgram(prog);
- for(const n of['U','S','R','Up','Fw','K'])loc[n]=gl.getUniformLocation(prog,n);
+ for(const n of['U','S','R','Up','Fw','K','T'])loc[n]=gl.getUniformLocation(prog,n);
  vao=gl.createVertexArray();gl.bindVertexArray(vao);
  const cb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,cb);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([0,0,1,0,0,1,1,1]),gl.STATIC_DRAW);
  gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
@@ -148,6 +153,21 @@ function upload(cells){
  nCells=cells.length/6;
 }
 
+let allCells=new Float32Array(0),tiltList=[];
+function curRange(){const T=+$('tilt').value,t=tiltList.find(e=>Math.abs(e.el-T)<.06);return T>=0&&t?t:{start:0,n:allCells.length/6}}
+function fillTilts(t){
+ const sel=$('tilt'),old=+sel.value,had=sel.dataset.set;tiltList=t;
+ sel.innerHTML='<option value="-1">All tilts</option>'+t.map(e=>`<option value="${e.el}">${e.el.toFixed(1)}°</option>`).join('');
+ const m=t.find(e=>Math.abs(e.el-old)<.15);sel.value=m?m.el:(had&&old==-1)||!t.length?-1:t[0].el;sel.dataset.set=1;
+}
+function drawPPI(){   // polar minimap of the selected tilt (lowest tilt when "All")
+ const T=+$('tilt').value,rg=T<0&&tiltList.length?tiltList[0]:curRange(),c=ppiImg.getContext('2d'),sc=150/230,rd=Math.PI/180,P=COL.map(()=>new Path2D()),A=allCells;
+ for(let i=rg.start*6;i<(rg.start+rg.n)*6;i+=6){
+  const az=A[i],r=A[i+1],aw=A[i+4]/2,g=A[i+5]/2,a0=(az-aw)*rd,a1=(az+aw)*rd,r0=(r-g)*sc,r1=(r+g)*sc,q=P[bin(A[i+3])];
+  q.moveTo(150+r0*Math.sin(a0),150-r0*Math.cos(a0));q.lineTo(150+r1*Math.sin(a0),150-r1*Math.cos(a0));
+  q.lineTo(150+r1*Math.sin(a1),150-r1*Math.cos(a1));q.lineTo(150+r0*Math.sin(a1),150-r0*Math.cos(a1));q.closePath()}
+ c.clearRect(0,0,300,300);P.forEach((q,b)=>{c.fillStyle=COL[b];c.fill(q)});
+}
 async function load(){
  const id=$('stn').value;$st.textContent='Loading '+id+'…';
  try{
@@ -163,22 +183,14 @@ async function load(){
   let buf=await(await fetch(B+key)).arrayBuffer();
   const a=new Uint8Array(buf);
   if(a[0]==0x1f&&a[1]==0x8b)buf=await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-  const {cells,s1}=parseL2(buf);
-  if(gl)upload(cells);
-  // polar PPI minimap: connected annular sectors, one path per color
-  const c=ppiImg.getContext('2d'),sc=150/230,rd=Math.PI/180;c.clearRect(0,0,300,300);
-  for(let b=0;b<12;b++){c.beginPath();
-   for(let i=0;i<s1.length;i+=5){if(bin(s1[i+2])!=b)continue;
-    const a0=(s1[i]-s1[i+3]/2)*rd,a1=(s1[i]+s1[i+3]/2)*rd,r0=(s1[i+1]-s1[i+4]/2)*sc,r1=(s1[i+1]+s1[i+4]/2)*sc;
-    c.moveTo(150+r0*Math.sin(a0),150-r0*Math.cos(a0));c.lineTo(150+r1*Math.sin(a0),150-r1*Math.cos(a0));
-    c.lineTo(150+r1*Math.sin(a1),150-r1*Math.cos(a1));c.lineTo(150+r0*Math.sin(a1),150-r0*Math.cos(a1));c.closePath()}
-   c.fillStyle=COL[b];c.fill()}
+  const {cells,tilts}=parseL2(buf);
+  if(gl)upload(cells);allCells=cells;fillTilts(tilts);drawPPI();
   scanKey=key.split('/').pop();
  }catch(e){scanKey='';$st.textContent='Error: '+e.message}
 }
 
 // ---- orientation (screen-rotation aware)
-let thq=null;
+let hsrc=0,thq=null,manual=0,locked=false,curHd=0;
 const sa=(a)=>((a+540)%360)-180;
 function onO(e){
  if(e.type=='deviceorientationabsolute')abs=true;else if(abs)return;
@@ -190,9 +202,9 @@ function onO(e){
  if(Math.abs(ff[2])<.75){let bz=-9;for(let q=0;q<4;q++){const t=q*Math.PI/2,z=c0[2]*Math.sin(t)+c1[2]*Math.cos(t);if(z>bz){bz=z;thq=t}}}  // screen roll from gravity, not the API
  const ct=Math.cos(thq),st=Math.sin(thq),rr=c0.map((x,i)=>x*ct-c1[i]*st),uu=c0.map((x,i)=>x*st+c1[i]*ct);
  basis={r:rr,u:uu,f:ff};
- if(e.webkitCompassHeading!=null){          // iOS: relative alpha -> align yaw to compass
-  const ref=Math.abs(ff[2])>.7?Math.atan2(c1[0],c1[1]):Math.atan2(ff[0],ff[1]),t=e.webkitCompassHeading-ref/r;
-  corr=corr+sa(t-corr)*.08;
+ if(e.webkitCompassHeading!=null&&!locked){          // iOS: relative alpha -> align yaw to compass
+  const flat=Math.abs(ff[2])>.85,ref=flat?Math.atan2(c1[0],c1[1]):Math.atan2(ff[0],ff[1]),t=e.webkitCompassHeading-ref/r;
+  if(flat){corr=hsrc<2?t:corr+sa(t-corr)*.03;hsrc=2}else if(!hsrc){corr=t;hsrc=1}  // trusted only while flat; never tracked while turning
  }
 }
 let drag=null;
@@ -224,30 +236,51 @@ $('loc').onclick=()=>{
  if(v){const [a,o]=v.split(',').map(Number);if(isFinite(a)&&isFinite(o)){user={lat:a,lon:o};gps='manual location';return}}
  startGeo();
 };
-$('stn').onchange=()=>{chosen=true;load()};setInterval(load,300000);load();
+$('tilt').onchange=drawPPI;$('stn').onchange=()=>{chosen=true;load()};setInterval(load,300000);load();
 
 // ---- render
+function sunPos(dt,lat,lon){
+ const R=Math.PI/180,d=dt/864e5-10957.5,M=R*(357.5291+.98560028*d),C=R*(1.9148*Math.sin(M)+.02*Math.sin(2*M)+.0003*Math.sin(3*M)),L=M+C+R*102.9372+Math.PI,e=R*23.4397;
+ const dec=Math.asin(Math.sin(e)*Math.sin(L)),ra=Math.atan2(Math.sin(L)*Math.cos(e),Math.cos(L)),H=R*(280.16+360.9856235*d+lon)-ra,p=lat*R;
+ return {az:(Math.atan2(Math.sin(H),Math.cos(H)*Math.sin(p)-Math.tan(dec)*Math.cos(p))/R+180)%360,alt:Math.asin(Math.sin(p)*Math.sin(dec)+Math.cos(p)*Math.cos(dec)*Math.cos(H))/R};
+}
+$('cal').onclick=()=>{
+ const u=user||ST[$('stn').value],sp=sunPos(new Date(),u.lat,u.lon);
+ const v=prompt('Calibrate: type the compass bearing (0-359) the CENTER of the screen faces now'+(sp.alt>0?', or leave blank if the center is aimed right at the sun':'')+':');
+ const t=v?+v:(sp.alt>0?sp.az:NaN);
+ if(isFinite(t)){manual+=sa(t-curHd);locked=true}
+};
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 function frame(){
  const W=innerWidth,H=innerHeight,dpr=Math.min(devicePixelRatio||1,2);
- if(cv.width!=W*dpr||cv.height!=H*dpr){cv.width=hud.width=W*dpr;cv.height=hud.height=H*dpr}
+ if(cv.width!=W||cv.height!=H){cv.width=W;cv.height=H}if(hud.width!=W*dpr||hud.height!=H*dpr){hud.width=W*dpr;hud.height=H*dpr}
  const s=ST[$('stn').value],u=user||s,k=111.19,dN=(s.lat-u.lat)*k,dE=(s.lon-u.lon)*k*Math.cos(u.lat*Math.PI/180);
  const F=Math.max(W,H)/(2*Math.tan($('fov').value*Math.PI/360));
- const ya=(corr+ +$('yaw').value)*Math.PI/180,cy=Math.cos(ya),sy=Math.sin(ya),rot=v=>[v[0]*cy+v[1]*sy,-v[0]*sy+v[1]*cy,v[2]];
+ const ya=(corr+manual+ +$('yaw').value)*Math.PI/180,cy=Math.cos(ya),sy=Math.sin(ya),rot=v=>[v[0]*cy+v[1]*sy,-v[0]*sy+v[1]*cy,v[2]];
  const r=rot(basis.r),up=rot(basis.u),f=rot(basis.f);
  if(gl&&nCells){
   gl.viewport(0,0,cv.width,cv.height);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
   gl.useProgram(prog);gl.bindVertexArray(vao);
-  gl.uniform2f(loc.U,dE,dN);gl.uniform2f(loc.S,2*F/W,2*F/H);gl.uniform3fv(loc.R,r);gl.uniform3fv(loc.Up,up);gl.uniform3fv(loc.Fw,f);
-  gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,nCells);
+  gl.uniform1f(loc.T,-1);gl.uniform2f(loc.U,dE,dN);gl.uniform2f(loc.S,2*F/W,2*F/H);gl.uniform3fv(loc.R,r);gl.uniform3fv(loc.Up,up);gl.uniform3fv(loc.Fw,f);
+  const rg=curRange();gl.bindBuffer(gl.ARRAY_BUFFER,ibuf);gl.vertexAttribPointer(1,4,gl.FLOAT,false,24,rg.start*24);gl.vertexAttribPointer(2,2,gl.FLOAT,false,24,rg.start*24+16);
+  gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,rg.n);
  }
  // HUD: cardinals + station marker
  hx.setTransform(dpr,0,0,dpr,0,0);hx.clearRect(0,0,W,H);hx.font='bold 16px system-ui';hx.textAlign='center';hx.fillStyle='#fff';hx.strokeStyle='#000';hx.lineWidth=3;
  const pr=v=>{const d=dot(v,f);return d>.001?[W/2+F*dot(v,r)/d,H/2-F*dot(v,up)/d]:null};
+ {const D=Math.PI/180,Tt=+$('tilt').value,Te=(Tt>=0?Tt:(tiltList[0]?.el??.5))*D,ce=Math.cos(Te),se=Math.sin(Te),az0=Math.atan2(f[0],f[1]);
+  const gp=(az,rg)=>{const s=rg*ce,x=s*Math.sin(az)+dE,y=s*Math.cos(az)+dN;return pr([x,y,rg*se+rg*rg/16990-(x*x+y*y)/12742])};
+  const line=(fn,n)=>{let pen=false;hx.beginPath();for(let i=0;i<=n;i++){const q=fn(i);if(q){pen?hx.lineTo(q[0],q[1]):hx.moveTo(q[0],q[1]);pen=true}else pen=false}hx.stroke()};
+  hx.save();hx.lineWidth=1;hx.strokeStyle='rgba(255,255,255,.5)';hx.fillStyle='#fff';hx.font='12px system-ui';
+  for(let rg=25;rg<=225;rg+=25){line(i=>gp(i*4*D,rg),90);const q=gp(az0,rg);if(q)hx.fillText(rg+' km',q[0],q[1]-4)}
+  for(let a=0;a<360;a+=30)line(i=>gp(a*D,i*5),46);
+  hx.restore()}
  for(const [t,v] of[['N',[0,1,0]],['E',[1,0,0]],['S',[0,-1,0]],['W',[-1,0,0]]]){const q=pr(v);if(q){hx.strokeText(t,q[0],q[1]);hx.fillText(t,q[0],q[1])}}
  const q=pr([dE,dN,0]);if(q){hx.lineWidth=2;hx.beginPath();hx.arc(q[0],q[1],10,0,7);hx.stroke();hx.strokeStyle='#fff';hx.stroke();hx.strokeStyle='#000';hx.fillText($('stn').value,q[0],q[1]-16)}
- const hd=(Math.atan2(f[0],f[1])*180/Math.PI+360)%360,br=(Math.atan2(dE,dN)*180/Math.PI+360)%360;
- if(scanKey)$st.textContent=`${$('stn').value} ${Math.hypot(dE,dN).toFixed(0)} km @ ${br.toFixed(0)}° · facing ${hd.toFixed(0)}° · tilt ${(Math.asin(f[2])*180/Math.PI).toFixed(0)}° · ${gps} · ${scanKey}${sensors?'':' · drag to look'}`;
+ const sp=sunPos(new Date(),u.lat,u.lon);
+ if(sp.alt>-2){const ca=Math.cos(sp.alt*Math.PI/180),q2=pr([Math.sin(sp.az*Math.PI/180)*ca,Math.cos(sp.az*Math.PI/180)*ca,Math.sin(sp.alt*Math.PI/180)]);if(q2){hx.fillStyle='#ffd400';hx.beginPath();hx.arc(q2[0],q2[1],16,0,7);hx.fill();hx.stroke();hx.fillStyle='#fff';hx.strokeText('SUN',q2[0],q2[1]+34);hx.fillText('SUN',q2[0],q2[1]+34)}}
+ const hd=(curHd=(Math.atan2(f[0],f[1])*180/Math.PI+360)%360),br=(Math.atan2(dE,dN)*180/Math.PI+360)%360;
+ if(scanKey)$st.textContent=`${$('stn').value} ${Math.hypot(dE,dN).toFixed(0)} km @ ${br.toFixed(0)}° · facing ${hd.toFixed(0)}° · pitch ${(Math.asin(f[2])*180/Math.PI).toFixed(0)}° · ${gps} · sun ${sp.az.toFixed(0)}°/${sp.alt.toFixed(0)}° up · ${scanKey}${sensors?'':' · drag to look'}`;
  // polar PPI
  pc.clearRect(0,0,300,300);pc.drawImage(ppiImg,0,0);
  pc.strokeStyle='#fff6';pc.lineWidth=1;for(const rr of[50,100,150,200]){pc.beginPath();pc.arc(150,150,rr*150/230,0,7);pc.stroke()}
