@@ -1,7 +1,8 @@
 /*
- * The sampled 3D beam volumes were made almost invisible by the reduced
- * fragment color/alpha. Keep the NEXRAD colors intact and use a high alpha so
- * overlapping beam cells remain visible over the camera feed on iPad Safari.
+ * The app patches the pinned source's shader before compiling it. Keep the
+ * 3D beam/cone geometry and elevation calculation, but emit correctly
+ * premultiplied translucent colors so the WebGL canvas can composite visibly
+ * over the iPad camera feed.
  */
 (() => {
   const prototype = window.WebGL2RenderingContext?.prototype;
@@ -15,7 +16,7 @@
     if (typeof source === 'string') {
       source = source.replace(
         'o=vec4(K[i]*.24,.24);',
-        'o=vec4(K[i],.78);'
+        'o=vec4(K[i],.72);'
       );
     }
     return originalShaderSource.call(this, shader, source);
