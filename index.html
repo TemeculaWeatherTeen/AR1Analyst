@@ -16,7 +16,7 @@ select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28p
 #ttl{flex:1;text-align:center;font-weight:600;font-size:15px}
 #prods{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;touch-action:pan-x}
 #prods button{flex:none;font-weight:600}#prods button.on{background:var(--blue)}#prods button:disabled{opacity:.35}
-#prods i{width:1px;background:var(--sep);flex:none;margin:2px}#chips,#pbtn{display:contents}
+#prods i{width:1px;background:var(--sep);flex:none;margin:2px}#chips,#pbtn{display:contents}#volbtn.on{background:var(--blue)}body.vol #chips{opacity:.35}
 #info,#info2{top:calc(var(--st) + 104px);padding:6px 10px;font-size:12px;line-height:1.4}
 #info{left:8px}#info2{right:8px;text-align:right}
 #leg{left:8px;top:50%;transform:translateY(-50%);padding:6px;font-size:11px}
@@ -35,7 +35,7 @@ select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28p
 <video id="cam" playsinline muted autoplay></video>
 <canvas id="ar"></canvas><canvas id="hud"></canvas>
 <div id="top" class="glass">
- <div class="r"><select id="stn" aria-label="Radar station"></select><div id="ttl">AR1Analyst</div><button id="gear" aria-label="Settings">⚙︎</button></div>
+ <div class="r"><select id="stn" aria-label="Radar station"></select><div id="ttl">AR1Analyst</div><button id="volbtn">▣ Vol</button><button id="gear" aria-label="Settings">⚙︎</button></div>
  <div id="prods"><span id="pbtn"></span><i></i><span id="chips"></span></div>
  <select id="tilt" hidden><option value="-1">All tilts</option></select>
 </div>
@@ -49,6 +49,9 @@ select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28p
 <div id="sheet" class="glass" hidden>
  <div class="row"><span>Field of view</span><input id="fov" type="range" min="30" max="90" value="63"><output id="fovo">63°</output></div>
  <div class="row"><span>Yaw trim</span><input id="yaw" type="range" min="-180" max="180" value="0"><output id="yawo">0°</output></div>
+ <div class="row"><span>Declination (° E)</span><input id="decl" type="number" step="0.5" value="0" title="magnetic declination, east positive"></div>
+ <div class="row"><span>Volume density</span><input id="vden" type="range" min="5" max="80" value="25"><output id="vdeno">25</output></div>
+ <div class="row"><span>Volume quality</span><select id="vq"><option>Fast</option><option selected>Balanced</option><option>Sharp</option></select></div>
  <div class="row"><span>Smoothing</span><input id="smooth" class="sw" type="checkbox" checked></div>
  <div class="row"><span>Clear-air echoes</span><input id="weak" class="sw" type="checkbox"></div>
  <div class="row"><span>Opacity</span><input id="op" type="range" min="20" max="100" value="75"><output id="opo">75%</output></div>
@@ -282,6 +285,102 @@ void main(){
  for(const [a,b] of[[gl.TEXTURE_MIN_FILTER,gl.LINEAR],[gl.TEXTURE_MAG_FILTER,gl.LINEAR],[gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE],[gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE]])gl.texParameteri(gl.TEXTURE_2D,a,b);
  gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
 }
+// ---- volumetric mode: all tilts of the product packed into one 3D texture (az x range x tilt) and ray-marched per pixel
+let vprog,vloc={},volOn=false,vols={};
+const VOLFRAG=`#version 300 es
+precision highp float; precision highp sampler3D;
+uniform sampler3D V; uniform sampler2D Lut,Pal;
+uniform vec2 U,WH,RES,SO; uniform vec3 R,Up,Fw,SR; uniform vec4 PL;
+uniform float F,Mn,Op,K,NT,TM; uniform int NS;
+out vec4 o;
+vec3 smp(vec3 p){                       // p = km from the viewer (east,north,up w/ curvature) -> (value, weight, rawNorm)
+ vec2 q=p.xy-U; float s=length(q);
+ float hg=p.z+dot(p.xy,p.xy)/12742.;     // height above ground
+ if(hg<0.||s<.5)return vec3(0.);
+ float r=length(vec2(s,hg)),h2=hg;
+ for(int i=0;i<2;i++){h2=hg-r*r/16990.;r=length(vec2(s,h2));}   // invert 4/3-earth beam height
+ float el=degrees(atan(h2,s));
+ if(r>=459.)return vec3(0.);
+ float f=texelFetch(Lut,ivec2(int(clamp((el+1.)/31.*511.,0.,511.)),0),0).r;
+ if(f<0.)return vec3(0.);
+ float az=degrees(atan(q.x,q.y));if(az<0.)az+=360.;
+ vec2 t=texture(V,vec3((az+.5)/360.,r/460.,(f+.5)/NT)).rg;
+ if(t.g<.02)return vec3(0.);
+ float rn=t.r/t.g,v=(rn*255.-SO.y)/SO.x;
+ if(v<Mn)return vec3(0.);
+ if(SR.z>0.)v-=SR.x*cos(radians(az-SR.y));
+ return vec3(v*PL.z+PL.w,t.g,rn);
+}
+void main(){
+ vec2 px=(gl_FragCoord.xy/RES-.5)*WH;
+ vec3 d=normalize(Fw+(px.x*R+px.y*Up)/F);
+ if(d.z<-.03){o=vec4(0.);return;}
+ float jit=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453);
+ vec3 L=normalize(vec3(.35,.25,.9));
+ vec4 acc=vec4(0.);float t=.4;
+ for(int i=0;i<NS;i++){
+  float dt=max(.4,t*.03);
+  vec3 p=d*(t+dt*jit),s=smp(p);
+  if(s.y>0.&&s.x>=PL.x){
+   float u=clamp((s.x-PL.x)/(PL.y-PL.x),0.,1.);
+   vec4 c=texture(Pal,vec2(u,.5));
+   float a=1.-exp(-K*c.a*(.15+.85*clamp(u*1.7,0.,1.))*smoothstep(0.,.7,s.y)*dt);
+   if(a>.01){
+    vec3 s2=smp(p+L*1.2);
+    float sh=clamp(1.+2.5*(s.z-(s2.y>0.?s2.z:0.)),.6,1.4);   // lit volume: brighter toward the light, self-shadowed away
+    acc.rgb+=(1.-acc.a)*a*c.rgb*sh;acc.a+=(1.-acc.a)*a;}
+  }
+  t+=dt;if(t>TM||acc.a>.98)break;
+ }
+ o=acc*Op;}`;
+if(gl){
+ const sh=(t,s)=>{const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);if(!gl.getShaderParameter(o,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(o));return o};
+ vprog=gl.createProgram();
+ gl.attachShader(vprog,sh(gl.VERTEX_SHADER,`#version 300 es
+void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0.,1.);}`));
+ gl.attachShader(vprog,sh(gl.FRAGMENT_SHADER,VOLFRAG));gl.linkProgram(vprog);
+ for(const n of['V','Lut','Pal','U','WH','RES','SO','R','Up','Fw','SR','PL','F','Mn','Op','K','NT','TM','NS'])vloc[n]=gl.getUniformLocation(vprog,n);
+}
+function packVol(cuts){   // resample every tilt to 1° x 1 km bins; R=mean raw (first tilt's scale), G=valid
+ const NA=360,NR=460,T=cuts.length,data=new Uint8Array(NA*NR*T*2),sum=new Float32Array(NA*NR),cnt=new Uint16Array(NA*NR),c0=cuts[0];
+ for(let k=0;k<T;k++){const c=cuts[k];sum.fill(0);cnt.fill(0);
+  for(let g=0;g<c.ng;g++){const j=Math.floor(c.r0+g*c.gs);if(j<0||j>=NR)continue;
+   for(let i=0;i<c.N;i++){const q=(g*c.N+i)*2;if(!c.data[q+1])continue;
+    const m=j*NA+Math.round(i*c.aw)%NA;sum[m]+=(c.data[q]-c.off)/c.sc*c0.sc+c0.off;cnt[m]++}}
+  const base=k*NA*NR;
+  for(let m=0;m<NA*NR;m++)if(cnt[m]){const q=(base+m)*2;data[q]=Math.max(2,Math.min(255,Math.round(sum[m]/cnt[m])));data[q+1]=255}}
+ const els=cuts.map(c=>c.el),lut=new Float32Array(512);   // elevation (-1..30°) -> fractional tilt index, -1 = no beam there
+ for(let m=0;m<512;m++){const e=-1+31*m/511;let f=-1;
+  if(e>=els[0]-.6&&e<=els[T-1]+1){if(e<=els[0])f=0;else if(e>=els[T-1])f=T-1;else{let k=0;while(els[k+1]<=e)k++;f=k+(e-els[k])/(els[k+1]-els[k])}}
+  lut[m]=f}
+ return {NA,NR,T,data,lut,sc:c0.sc,off:c0.off};
+}
+function buildVol(cuts){
+ const v=packVol(cuts),P2=gl.TEXTURE_2D,P3=gl.TEXTURE_3D;gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
+ const tex=gl.createTexture();gl.activeTexture(gl.TEXTURE2);gl.bindTexture(P3,tex);
+ gl.texImage3D(P3,0,gl.RG8,v.NA,v.NR,v.T,0,gl.RG,gl.UNSIGNED_BYTE,v.data);
+ gl.texParameteri(P3,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(P3,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+ gl.texParameteri(P3,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(P3,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texParameteri(P3,gl.TEXTURE_WRAP_R,gl.CLAMP_TO_EDGE);
+ const lut=gl.createTexture();gl.activeTexture(gl.TEXTURE3);gl.bindTexture(P2,lut);
+ gl.texImage2D(P2,0,gl.R32F,512,1,0,gl.RED,gl.FLOAT,v.lut);
+ for(const [a,b] of[[gl.TEXTURE_MIN_FILTER,gl.NEAREST],[gl.TEXTURE_MAG_FILTER,gl.NEAREST],[gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE],[gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE]])gl.texParameteri(P2,a,b);
+ return {tex,lut,T:v.T,sc:v.sc,off:v.off};
+}
+function freeVols(){for(const k in vols){gl.deleteTexture(vols[k].tex);gl.deleteTexture(vols[k].lut)}vols={}}
+function drawVolume(dE,dN,W,H,F,r,up,f){
+ const key=PRODS[curCode];if(!P[key]||!P[key].length)return;
+ if(!vols[key])vols[key]=buildVol(P[key]);
+ const V=vols[key],pl=PALS[curCode],sr=srv();
+ gl.viewport(0,0,cv.width,cv.height);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
+ gl.useProgram(vprog);gl.bindVertexArray(null);
+ gl.uniform2f(vloc.U,dE,dN);gl.uniform2f(vloc.WH,W,H);gl.uniform2f(vloc.RES,cv.width,cv.height);gl.uniform2f(vloc.SO,V.sc,V.off);
+ gl.uniform3fv(vloc.R,r);gl.uniform3fv(vloc.Up,up);gl.uniform3fv(vloc.Fw,f);gl.uniform3f(vloc.SR,sr[0],sr[1],sr[2]);gl.uniform4f(vloc.PL,pl.lo,pl.hi,pl.scale,pl.offset);
+ gl.uniform1f(vloc.F,F);gl.uniform1f(vloc.Mn,curCode=='BR'?($('weak').checked?-30:10):-1e9);gl.uniform1f(vloc.Op,$('op').value/100);
+ gl.uniform1f(vloc.K,$('vden').value/100);gl.uniform1f(vloc.NT,V.T);gl.uniform1f(vloc.TM,Math.min(700,Math.hypot(dE,dN)+460));gl.uniform1i(vloc.NS,[96,144,192][$('vq').selectedIndex]);
+ gl.uniform1i(vloc.Pal,1);gl.uniform1i(vloc.V,2);gl.uniform1i(vloc.Lut,3);
+ gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,palTex);gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_3D,V.tex);gl.activeTexture(gl.TEXTURE3);gl.bindTexture(gl.TEXTURE_2D,V.lut);
+ gl.drawArrays(gl.TRIANGLES,0,3);gl.activeTexture(gl.TEXTURE0);
+}
 const allCuts=()=>Object.values(P).flat();
 function setFilter(){const f=$('smooth').checked?gl.LINEAR:gl.NEAREST;gl.activeTexture(gl.TEXTURE0);
  for(const c of allCuts())if(c.tex){gl.bindTexture(gl.TEXTURE_2D,c.tex);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,f);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,f)}}
@@ -364,7 +463,7 @@ async function load(){
   const a=new Uint8Array(buf);
   if(a[0]==0x1f&&a[1]==0x8b)buf=await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
   const {prods,vcp:vc}=parseL2(buf);vcp=vc;
-  if(gl)freeTex();P=prods;setProduct(P[PRODS[curCode]]&&P[PRODS[curCode]].length?curCode:'BR');
+  if(gl){freeTex();freeVols()}P=prods;setProduct(P[PRODS[curCode]]&&P[PRODS[curCode]].length?curCode:'BR');
   scanKey=key.split('/').pop();const mm=scanKey.match(/(\d{4})(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)/);vt=mm?Date.UTC(+mm[1],mm[2]-1,+mm[3],+mm[4],+mm[5],+mm[6]):null;info();
  }catch(e){scanKey='';$st.textContent='Error: '+e.message}
 }
@@ -399,7 +498,7 @@ function startGeo(){
  if(!navigator.geolocation){gps='GPS: unsupported';return}
  gps='GPS: waiting for permission…';
  navigator.geolocation.watchPosition(p=>{
-  const first=!user;user={lat:p.coords.latitude,lon:p.coords.longitude};gps=`GPS ±${p.coords.accuracy|0} m`;
+  const first=!user;user={lat:p.coords.latitude,lon:p.coords.longitude};gps=`GPS ±${p.coords.accuracy|0} m`;autoDecl();
   if(first&&!chosen){let b=1e9,bi;for(const k in ST){const d=(ST[k].lat-user.lat)**2+((ST[k].lon-user.lon)*Math.cos(user.lat*Math.PI/180))**2;if(d<b){b=d;bi=k}}
    if(bi!=$('stn').value){$('stn').value=bi;load()}}
  },e=>{gps='GPS '+(e.code==1?'denied — enable in Settings › Privacy › Location Services › Safari Websites, or tap 📍':'error: '+e.message)},{enableHighAccuracy:true,maximumAge:10000,timeout:30000});
@@ -413,10 +512,10 @@ $('go').onclick=()=>{
 };
 $('loc').onclick=()=>{
  const v=prompt('Enter "lat,lon" manually, or leave blank to retry GPS:');
- if(v){const [a,o]=v.split(',').map(Number);if(isFinite(a)&&isFinite(o)){user={lat:a,lon:o};gps='manual location';return}}
+ if(v){const [a,o]=v.split(',').map(Number);if(isFinite(a)&&isFinite(o)){user={lat:a,lon:o};gps='manual location';autoDecl();return}}
  startGeo();
 };
-$('tilt').onchange=drawPPI;$('stn').onchange=()=>{chosen=true;load()};load();setInterval(()=>{if(Date.now()>=nextAt)load();info()},1000);
+$('tilt').onchange=drawPPI;$('stn').onchange=()=>{chosen=true;load();autoDecl()};load();setInterval(()=>{if(Date.now()>=nextAt)load();info()},1000);
 
 // ---- render
 function sunPos(dt,lat,lon){
@@ -428,17 +527,17 @@ $('cal').onclick=()=>{
  const u=user||ST[$('stn').value],sp=sunPos(new Date(),u.lat,u.lon);
  const v=prompt('Calibrate: type the compass bearing (0-359) the CENTER of the screen faces now'+(sp.alt>0?', or leave blank if the center is aimed right at the sun':'')+':');
  const t=v?+v:(sp.alt>0?sp.az:NaN);
- if(isFinite(t)){manual+=sa(t-curHd);locked=true}
+ if(isFinite(t)){manual+=sa(t-curHd)+(locked?0:(+$('decl').value||0));locked=true}
 };
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 function frame(){
  const W=innerWidth,H=innerHeight,dpr=Math.min(devicePixelRatio||1,2);
- if(cv.width!=W||cv.height!=H){cv.width=W;cv.height=H}if(hud.width!=W*dpr||hud.height!=H*dpr){hud.width=W*dpr;hud.height=H*dpr}
+ const vs=volOn?[.4,.55,.75][$('vq').selectedIndex]:1,cw=Math.round(W*vs),ch=Math.round(H*vs);if(cv.width!=cw||cv.height!=ch){cv.width=cw;cv.height=ch}if(hud.width!=W*dpr||hud.height!=H*dpr){hud.width=W*dpr;hud.height=H*dpr}
  const s=ST[$('stn').value],u=user||s,k=111.19,dN=(s.lat-u.lat)*k,dE=(s.lon-u.lon)*k*Math.cos(u.lat*Math.PI/180);
  const F=Math.max(W,H)/(2*Math.tan($('fov').value*Math.PI/360));
- const ya=(corr+manual+ +$('yaw').value)*Math.PI/180,cy=Math.cos(ya),sy=Math.sin(ya),rot=v=>[v[0]*cy+v[1]*sy,-v[0]*sy+v[1]*cy,v[2]];
+ const ya=(corr+manual+(locked?0:(+$('decl').value||0))+ +$('yaw').value)*Math.PI/180,cy=Math.cos(ya),sy=Math.sin(ya),rot=v=>[v[0]*cy+v[1]*sy,-v[0]*sy+v[1]*cy,v[2]];
  const r=rot(basis.r),up=rot(basis.u),f=rot(basis.f);
- if(gl&&tiltList.length)drawCones(dE,dN,W,H,F,r,up,f);
+ if(gl&&tiltList.length){if(volOn)drawVolume(dE,dN,W,H,F,r,up,f);else drawCones(dE,dN,W,H,F,r,up,f)}
  // HUD: cardinals + station marker
  hx.setTransform(dpr,0,0,dpr,0,0);hx.clearRect(0,0,W,H);hx.font='bold 16px system-ui';hx.textAlign='center';hx.fillStyle='#fff';hx.strokeStyle='#000';hx.lineWidth=3;
  const pr=v=>{const d=dot(v,f);return d>.001?[W/2+F*dot(v,r)/d,H/2-F*dot(v,up)/d]:null};
@@ -469,6 +568,13 @@ function frame(){
  pc.fillStyle='#fff';pc.font='14px sans-serif';pc.textAlign='left';pc.fillText('N',143,14);pc.textAlign='center';pc.fillText(ppiR.toFixed(0)+' km',150,288);
  requestAnimationFrame(frame);
 }
+// approximate magnetic declination (° east, ~2026) near each radar site; editable. Phone compasses are magnetic, radar/sun are true north.
+const DECL={KNKX:11,KSOX:11.1,KVTX:11,KMUX:12.6,KDAX:12.6,KRTX:15,KATX:15,KOTX:14.2,KFSX:9.4,KIWA:9.2,KMTX:10.8,KFTG:7.3,KABX:8,KEPZ:7.3,KEWX:2.7,KFWS:3.1,KTLX:3.7,KHGX:2,KLOT:-3.7,KMPX:-.2,KDVN:-2.6,KEAX:3,KILX:-3,KDTX:-7,KCLE:-8.6,KOKX:-12.6,KDIX:-11.2,KLWX:-10.2,KFFC:-5.3,KAMX:-6.5,KTBW:-5.6,KJAX:-6,KBOX:-14.2,KABR:4};
+let declEdited=false;
+function autoDecl(){if(declEdited)return;const u=user||ST[$('stn').value];let b=1e9,bi;
+ for(const k in ST){const d=(ST[k].lat-u.lat)**2+((ST[k].lon-u.lon)*Math.cos(u.lat*Math.PI/180))**2;if(d<b){b=d;bi=k}}
+ $('decl').value=DECL[bi]}
+$('decl').oninput=()=>{declEdited=true};autoDecl();
 buildLegend();prodBtns();
 $('palbtn').onclick=()=>$('palfile').click();
 $('palfile').onchange=async e=>{
@@ -488,6 +594,9 @@ $('smooth').onchange=()=>{if(gl)setFilter()};$('weak').onchange=drawPPI;
 $('fov').oninput=$('yaw').oninput=()=>{$('fovo').textContent=$('fov').value+'°';$('yawo').textContent=$('yaw').value+'°'};
 $('gear').onclick=()=>{$('sheet').hidden=!$('sheet').hidden};
 addEventListener('click',e=>{if(!e.target.closest('#sheet,#gear'))$('sheet').hidden=true});
+$('volbtn').onclick=()=>{volOn=!volOn;$('volbtn').classList.toggle('on',volOn);document.body.classList.toggle('vol',volOn);
+ if(volOn)say('Volume: all tilts ray-marched. If it lags, lower Volume quality in ⚙︎')};
+$('vden').oninput=()=>{$('vdeno').textContent=$('vden').value};
 info();
 frame();
 </script></body></html>
