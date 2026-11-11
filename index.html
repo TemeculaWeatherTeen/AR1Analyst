@@ -178,14 +178,17 @@ async function load(){
 }
 
 // ---- orientation (screen-rotation aware)
+let thq=null;
 const sa=(a)=>((a+540)%360)-180;
 function onO(e){
  if(e.type=='deviceorientationabsolute')abs=true;else if(abs)return;
  if(e.alpha==null)return;sensors=true;
  const r=Math.PI/180,A=e.alpha*r,Bt=e.beta*r,G=e.gamma*r,cA=Math.cos(A),sA=Math.sin(A),cB=Math.cos(Bt),sB=Math.sin(Bt),cG=Math.cos(G),sG=Math.sin(G);
  const c0=[cA*cG-sA*sB*sG,cG*sA+cA*sB*sG,-cB*sG],c1=[-cB*sA,cA*cB,sB],c2=[cG*sA*sB+cA*sG,sA*sG-cA*cG*sB,cB*cG];
- const th=((screen.orientation&&screen.orientation.angle!=null?screen.orientation.angle:window.orientation)||0)*r,ct=Math.cos(th),st=Math.sin(th);
- const rr=c0.map((x,i)=>x*ct-c1[i]*st),uu=c0.map((x,i)=>x*st+c1[i]*ct),ff=c2.map(x=>-x);
+ const ff=c2.map(x=>-x);
+ if(thq==null)thq=((screen.orientation&&screen.orientation.angle!=null?screen.orientation.angle:window.orientation)||0)*r;
+ if(Math.abs(ff[2])<.75){let bz=-9;for(let q=0;q<4;q++){const t=q*Math.PI/2,z=c0[2]*Math.sin(t)+c1[2]*Math.cos(t);if(z>bz){bz=z;thq=t}}}  // screen roll from gravity, not the API
+ const ct=Math.cos(thq),st=Math.sin(thq),rr=c0.map((x,i)=>x*ct-c1[i]*st),uu=c0.map((x,i)=>x*st+c1[i]*ct);
  basis={r:rr,u:uu,f:ff};
  if(e.webkitCompassHeading!=null){          // iOS: relative alpha -> align yaw to compass
   const ref=Math.abs(ff[2])>.7?Math.atan2(c1[0],c1[1]):Math.atan2(ff[0],ff[1]),t=e.webkitCompassHeading-ref/r;
