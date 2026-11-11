@@ -30,6 +30,7 @@ select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28p
 #sheet .row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:.5px solid var(--sep)}
 #sheet .row:first-child{border-top:0}#sheet .row span{flex:1}#sheet .row button{flex:1}
 #sheet input{flex:2;accent-color:var(--blue)}#sheet output{width:44px;text-align:right;color:#aaa}
+#dlg{left:50%;transform:translateX(-50%);width:min(340px,calc(100% - 24px));bottom:calc(var(--sb) + 60px);z-index:8;padding:14px}#dlg #dmsg{margin-bottom:10px;line-height:1.35}#dlg input{width:100%;background:var(--fill);color:#fff;border:0;border-radius:10px;padding:10px;font:inherit;margin-bottom:10px;-webkit-user-select:text;user-select:text}#dlg .btns{display:flex;gap:8px}#dlg .btns button{flex:1}#dok{background:var(--blue)}
 #sheet input[type=number]{flex:none;width:64px;background:var(--fill);color:#fff;border:0;border-radius:8px;padding:6px;font:inherit;text-align:right}#sheet input.sw{-webkit-appearance:none;appearance:none;flex:none;width:51px;height:31px;border-radius:16px;background:#39393d;position:relative;transition:.2s}#sheet input.sw::after{content:'';position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;transition:.2s}#sheet input.sw:checked{background:#34C759}#sheet input.sw:checked::after{left:22px}
 </style></head><body>
 <video id="cam" playsinline muted autoplay></video>
@@ -45,6 +46,7 @@ select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28p
 <div id="prod" class="glass">BR</div>
 <div id="st" class="glass">Pick a station, then tap Start AR.</div>
 <canvas id="ppi" width="300" height="300"></canvas>
+<div id="dlg" class="glass" hidden><div id="dmsg"></div><input id="dinp" inputmode="decimal" autocomplete="off"><div class="btns"><button id="dno">Cancel</button><button id="dalt" hidden></button><button id="dok">OK</button></div></div>
 <button id="go">Start AR</button>
 <div id="sheet" class="glass" hidden>
  <div class="row"><span>Field of view</span><input id="fov" type="range" min="30" max="90" value="63"><output id="fovo">63°</output></div>
@@ -503,16 +505,34 @@ function startGeo(){
    if(bi!=$('stn').value){$('stn').value=bi;load()}}
  },e=>{gps='GPS '+(e.code==1?'denied — enable in Settings › Privacy › Location Services › Safari Websites, or tap 📍':'error: '+e.message)},{enableHighAccuracy:true,maximumAge:10000,timeout:30000});
 }
+let camStream=null;
+function startCam(){navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}).then(s=>{camStream=s;const v=$('cam');v.srcObject=s;v.play().catch(()=>{})}).catch(()=>{})}
+function ensureCam(){   // iOS pauses the video after dialogs / file pickers / app switches: bring it back
+ if(!camStream||document.hidden)return;const v=$('cam');
+ if(!camStream.getVideoTracks().some(t=>t.readyState=='live'))return startCam();
+ if(v.srcObject!==camStream)v.srcObject=camStream;
+ if(v.paused||v.ended)v.play().catch(()=>{});
+}
+$('cam').addEventListener('pause',()=>setTimeout(ensureCam,150));
+document.addEventListener('visibilitychange',ensureCam);addEventListener('focus',ensureCam);addEventListener('pageshow',ensureCam);
+setInterval(ensureCam,2000);
+// in-app input panel (replaces blocking prompt())
+function ask(msg,o={}){return new Promise(res=>{
+ const d=$('dlg'),i=$('dinp');$('sheet').hidden=true;$('dmsg').textContent=msg;i.value=o.def||'';i.placeholder=o.ph||'';
+ $('dalt').hidden=!o.alt;if(o.alt)$('dalt').textContent=o.alt;d.hidden=false;
+ const done=v=>{d.hidden=true;$('dok').onclick=$('dno').onclick=$('dalt').onclick=null;ensureCam();res(v)};
+ $('dok').onclick=()=>done({v:i.value.trim()});$('dno').onclick=()=>done(null);$('dalt').onclick=()=>done({alt:true})})}
 $('go').onclick=()=>{
  startGeo();                                   // no awaits before this
  try{if(DeviceOrientationEvent.requestPermission)DeviceOrientationEvent.requestPermission().catch(()=>{})}catch(e){}
  addEventListener('deviceorientationabsolute',onO,true);addEventListener('deviceorientation',onO,true);
- navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}).then(s=>$('cam').srcObject=s).catch(()=>{});
+ startCam();
  $('go').remove();
 };
-$('loc').onclick=()=>{
- const v=prompt('Enter "lat,lon" manually, or leave blank to retry GPS:');
- if(v){const [a,o]=v.split(',').map(Number);if(isFinite(a)&&isFinite(o)){user={lat:a,lon:o};gps='manual location';autoDecl();return}}
+$('loc').onclick=async()=>{
+ const r=await ask('Enter latitude,longitude manually, or leave blank to retry GPS.',{ph:'32.88,-117.15'});
+ if(!r)return;
+ if(r.v){const [a,o]=r.v.split(',').map(Number);if(isFinite(a)&&isFinite(o)){user={lat:a,lon:o};gps='manual location';autoDecl();say('Location set manually')}else say('Could not read that as lat,lon');return}
  startGeo();
 };
 $('tilt').onchange=drawPPI;$('stn').onchange=()=>{chosen=true;load();autoDecl()};load();setInterval(()=>{if(Date.now()>=nextAt)load();info()},1000);
@@ -523,11 +543,12 @@ function sunPos(dt,lat,lon){
  const dec=Math.asin(Math.sin(e)*Math.sin(L)),ra=Math.atan2(Math.sin(L)*Math.cos(e),Math.cos(L)),H=R*(280.16+360.9856235*d+lon)-ra,p=lat*R;
  return {az:(Math.atan2(Math.sin(H),Math.cos(H)*Math.sin(p)-Math.tan(dec)*Math.cos(p))/R+180)%360,alt:Math.asin(Math.sin(p)*Math.sin(dec)+Math.cos(p)*Math.cos(dec)*Math.cos(H))/R};
 }
-$('cal').onclick=()=>{
- const u=user||ST[$('stn').value],sp=sunPos(new Date(),u.lat,u.lon);
- const v=prompt('Calibrate: type the compass bearing (0-359) the CENTER of the screen faces now'+(sp.alt>0?', or leave blank if the center is aimed right at the sun':'')+':');
- const t=v?+v:(sp.alt>0?sp.az:NaN);
- if(isFinite(t)){manual+=sa(t-curHd)+(locked?0:(+$('decl').value||0));locked=true}
+$('cal').onclick=async()=>{
+ const u=user||ST[$('stn').value],sp=sunPos(new Date(),u.lat,u.lon),up=sp.alt>0;
+ const r=await ask('Calibrate heading: type the true compass bearing (0–359°) at the center of the screen'+(up?', or aim the center at the sun and tap Use sun.':'.'),{alt:up?'Use sun':null,ph:'e.g. 135'});
+ if(!r)return;
+ const t=r.alt?sp.az:(r.v!==''?+r.v:NaN);
+ if(isFinite(t)){manual+=sa(t-curHd)+(locked?0:(+$('decl').value||0));locked=true;say('Heading calibrated')}
 };
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 function frame(){
@@ -584,7 +605,7 @@ $('palfile').onchange=async e=>{
   PALS[k]=p;try{localStorage.setItem('ar1pal:'+k,await f.text())}catch(_){}
   if(k==curCode){if(gl)setPalTex();buildLegend();drawPPI()}say(`${k} color table loaded: ${f.name}`)
  }catch(err){say(`${f.name}: ${err.message}`)}}
- e.target.value='';
+ e.target.value='';ensureCam();
 };
 $('palreset').onclick=()=>{PALS[curCode]=buildPal(DEF[curCode]);try{localStorage.removeItem('ar1pal:'+curCode)}catch(_){}
  if(gl)setPalTex();buildLegend();drawPPI();say(curCode+' color table reset')};
@@ -593,7 +614,7 @@ $('op').oninput=()=>{$('opo').textContent=$('op').value+'%'};
 $('smooth').onchange=()=>{if(gl)setFilter()};$('weak').onchange=drawPPI;
 $('fov').oninput=$('yaw').oninput=()=>{$('fovo').textContent=$('fov').value+'°';$('yawo').textContent=$('yaw').value+'°'};
 $('gear').onclick=()=>{$('sheet').hidden=!$('sheet').hidden};
-addEventListener('click',e=>{if(!e.target.closest('#sheet,#gear'))$('sheet').hidden=true});
+addEventListener('click',e=>{if(!e.target.closest('#sheet,#gear,#dlg'))$('sheet').hidden=true});
 $('volbtn').onclick=()=>{volOn=!volOn;$('volbtn').classList.toggle('on',volOn);document.body.classList.toggle('vol',volOn);
  if(volOn)say('Volume: all tilts ray-marched. If it lags, lower Volume quality in ⚙︎')};
 $('vden').oninput=()=>{$('vdeno').textContent=$('vden').value};
