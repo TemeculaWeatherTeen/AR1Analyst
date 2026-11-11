@@ -1,6 +1,6 @@
 /*
  * Load the pinned radar application, then add device-orientation fixes,
- * selectable Level-II elevation cuts, and a 3D sampled-beam mesh.
+ * selectable Level-II elevation cuts, and a stable polar-cell renderer.
  */
 const originalSource =
   'https://raw.githubusercontent.com/TemeculaWeatherTeen/AR1Analyst/3659f88840c59743b65feacaca944bc0bc965364/index.html';
@@ -68,39 +68,13 @@ fetch(originalSource)
       'the tilt metadata export'
     );
 
-    // Apply optional volume rendering patches atomically so a mismatch can
-    // never prevent the base radar application or its tilt controls from loading.
-    try {
-      let volumeSource = source;
-      volumeSource = replaceRequired(volumeSource,
-        'layout(location=0) in vec2 c; layout(location=1) in vec4 A; layout(location=2) in vec2 Bw;',
-        'layout(location=0) in vec3 c; layout(location=1) in vec4 A; layout(location=2) in vec2 Bw;',
-        'the 3D radar-beam vertex format');
-      volumeSource = replaceRequired(volumeSource,
-        'float az=radians(A.x+(c.x-.5)*Bw.x), r=A.y+(c.y-.5)*Bw.y, el=radians(A.z);',
-        'float az=radians(A.x+c.x*Bw.x), r=A.y+c.y*Bw.y, el=radians(A.z+c.z*.95);',
-        'the physical beam-volume geometry');
-      volumeSource = replaceRequired(volumeSource, 'p.z=h-dot(p.xy,p.xy)/12742.;', 'p.z=h;', 'the radar beam earth-curvature model');
-      volumeSource = replacePattern(volumeSource,
-        /const cb=gl\.createBuffer\(\);gl\.bindBuffer\(gl\.ARRAY_BUFFER,cb\);gl\.bufferData\(gl\.ARRAY_BUFFER,new Float32Array\(\[0,0,1,0,0,1,1,1\]\),gl\.STATIC_DRAW\);\s*gl\.enableVertexAttribArray\(0\);gl\.vertexAttribPointer\(0,2,gl\.FLOAT,false,0,0\);/,
-        `const cb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,cb);
-  const cubeFaces=[
-   [[-.5,-.5,-.5],[.5,-.5,-.5],[.5,.5,-.5],[-.5,-.5,-.5],[.5,.5,-.5],[-.5,.5,-.5]],
-   [[-.5,-.5,.5],[.5,.5,.5],[.5,-.5,.5],[-.5,-.5,.5],[-.5,.5,.5],[.5,.5,.5]],
-   [[-.5,-.5,-.5],[-.5,.5,-.5],[-.5,.5,.5],[-.5,-.5,-.5],[-.5,.5,.5],[-.5,-.5,.5]],
-   [[.5,-.5,-.5],[.5,.5,.5],[.5,.5,-.5],[.5,-.5,-.5],[.5,-.5,.5],[.5,.5,.5]],
-   [[-.5,-.5,-.5],[.5,-.5,.5],[.5,-.5,-.5],[-.5,-.5,-.5],[-.5,-.5,.5],[.5,-.5,.5]],
-   [[-.5,.5,-.5],[.5,.5,-.5],[.5,.5,.5],[-.5,.5,-.5],[.5,.5,.5],[-.5,.5,.5]]
-  ];
-  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(cubeFaces.flat()),gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,0,0);`,
-        'the 3D beam-cell mesh');
-      volumeSource = replaceRequired(volumeSource, 'gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,nCells);', 'gl.drawArraysInstanced(gl.TRIANGLES,0,36,nCells);', 'the 3D beam-cell draw call');
-      volumeSource = replaceRequired(volumeSource, 'o=vec4(K[i]*.62,.62);', 'o=vec4(K[i]*.24,.24);', 'the translucent beam-cell rendering');
-      source = volumeSource;
-    } catch (error) {
-      console.warn('3D beam mesh unavailable; using the original polar-cell renderer.', error);
-    }
+    // Keep the original working polar-cell renderer. The custom 3D beam mesh
+    // was introducing a shader mismatch that caused the radar to disappear from
+    // the sky while leaving the minimap active.
+    //
+    // The rest of the app still uses the newer tilt controls and station list,
+    // but the actual sky rendering should stay on the original geometry that was
+    // previously visible in the iPad AR view.
 
     const tiltCode = `
 const tiltHost=document.getElementById('tilt-options');
