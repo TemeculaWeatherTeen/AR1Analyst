@@ -3,27 +3,59 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>AR1Analyst</title>
 <style>
-html,body{margin:0;height:100%;background:#000;color:#fff;font:14px system-ui,sans-serif;overflow:hidden;touch-action:none}
-#cam,#ar,#hud{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
+:root{--g:rgba(28,28,30,.66);--sep:rgba(255,255,255,.14);--blue:#0A84FF;--fill:rgba(120,120,128,.36);--sb:max(8px,env(safe-area-inset-bottom));--st:max(8px,env(safe-area-inset-top))}
+*{box-sizing:border-box}[hidden]{display:none!important}
+html,body{margin:0;height:100%;background:#000;color:#fff;font:14px -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;overflow:hidden;-webkit-user-select:none;user-select:none}
+#cam,#ar,#hud{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;touch-action:none}
 #hud{pointer-events:none;z-index:2}
-#ui{position:fixed;left:0;right:0;top:0;padding:max(8px,env(safe-area-inset-top)) 8px 8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#000a;z-index:3}
-select,button{font:inherit;padding:6px 10px;border-radius:8px;border:0}
-#st{position:fixed;left:8px;bottom:max(8px,env(safe-area-inset-bottom));z-index:3;font-size:12px;background:#000a;padding:6px 8px;border-radius:8px;max-width:55%}
-#ppi{position:fixed;right:8px;bottom:max(8px,env(safe-area-inset-bottom));width:150px;height:150px;border-radius:50%;background:#000a;z-index:3}
+.glass{position:fixed;z-index:3;background:var(--g);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);border:.5px solid var(--sep);border-radius:14px;font-variant-numeric:tabular-nums}
+button,select{font:inherit;color:#fff;border:0;background:var(--fill);border-radius:999px;padding:6px 12px;min-height:32px}
+select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28px;max-width:48vw;background-repeat:no-repeat;background-position:right 10px center;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E")}
+#top{left:8px;right:8px;top:var(--st);padding:6px;display:flex;flex-direction:column;gap:6px}
+.r{display:flex;align-items:center;gap:8px;min-width:0}
+#ttl{flex:1;text-align:center;font-weight:600;font-size:15px}
+#prods{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;touch-action:pan-x}
+#prods button{flex:none;font-weight:600}#prods button.on{background:var(--blue)}#prods button:disabled{opacity:.35}
+#prods i{width:1px;background:var(--sep);flex:none;margin:2px}#chips{display:contents}
+#info,#info2{top:calc(var(--st) + 104px);padding:6px 10px;font-size:12px;line-height:1.4}
+#info{left:8px}#info2{right:8px;text-align:right}
+#leg{left:8px;top:50%;transform:translateY(-50%);padding:6px;font-size:11px}
+#leg .h{text-align:center;font-weight:600;margin-bottom:3px}
+#leg .q{display:flex;align-items:center;gap:6px;height:20px}#leg b{width:14px;height:100%;display:block;border-radius:2px}
+#prod{left:8px;bottom:calc(var(--sb) + 48px);padding:5px 12px;font-weight:600}
+#st{left:8px;right:8px;bottom:var(--sb);padding:11px 14px;font-size:12px;white-space:nowrap;overflow-x:auto;scrollbar-width:none}
+#ppi{position:fixed;right:8px;bottom:calc(var(--sb) + 48px);width:150px;height:150px;border-radius:50%;background:rgba(0,0,0,.45);border:.5px solid var(--sep);z-index:3}
+#go{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:6;background:var(--blue);font-size:17px;font-weight:600;padding:14px 30px;box-shadow:0 8px 30px #0008}
+#sheet{left:50%;transform:translateX(-50%);width:min(420px,calc(100% - 16px));bottom:calc(var(--sb) + 48px);z-index:5;overflow:hidden}
+#sheet .row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:.5px solid var(--sep)}
+#sheet .row:first-child{border-top:0}#sheet .row span{flex:1}#sheet .row button{flex:1}
+#sheet input{flex:2;accent-color:var(--blue)}#sheet output{width:44px;text-align:right;color:#aaa}
+@media(max-height:520px){#leg .q{height:13px}}
 </style></head><body>
 <video id="cam" playsinline muted autoplay></video>
 <canvas id="ar"></canvas><canvas id="hud"></canvas>
-<div id="ui">
- <select id="stn" aria-label="Radar station"></select>
- <button id="go">Start AR</button>
- <button id="loc">📍</button><button id="cal">🧭 Cal</button><label>Tilt <select id="tilt"><option value="-1">All tilts</option></select></label><label>FOV <input id="fov" type="range" min="30" max="90" value="63"></label><label>Yaw <input id="yaw" type="range" min="-180" max="180" value="0"></label>
+<div id="top" class="glass">
+ <div class="r"><select id="stn" aria-label="Radar station"></select><div id="ttl">AR1Analyst</div><button id="gear" aria-label="Settings">⚙︎</button></div>
+ <div id="prods"><button class="on">BR</button><button disabled>BV</button><button disabled>SRV</button><button disabled>CC</button><i></i><span id="chips"></span></div>
+ <select id="tilt" hidden><option value="-1">All tilts</option></select>
 </div>
-<div id="st">Pick a station, then Start AR.</div>
+<div id="info" class="glass"><b id="iStn"></b><br>VCP: <span id="iVcp">—</span></div>
+<div id="info2" class="glass"><span id="iVT">VT: —</span><br><span id="iNext"></span></div>
+<div id="leg" class="glass"><div class="h">dBZ</div><div id="lb"></div></div>
+<div id="prod" class="glass">BR</div>
+<div id="st" class="glass">Pick a station, then tap Start AR.</div>
 <canvas id="ppi" width="300" height="300"></canvas>
+<button id="go">Start AR</button>
+<div id="sheet" class="glass" hidden>
+ <div class="row"><span>Field of view</span><input id="fov" type="range" min="30" max="90" value="63"><output id="fovo">63°</output></div>
+ <div class="row"><span>Yaw trim</span><input id="yaw" type="range" min="-180" max="180" value="0"><output id="yawo">0°</output></div>
+ <div class="row"><button id="cal">🧭 Calibrate heading</button></div>
+ <div class="row"><button id="loc">📍 Set location</button></div>
+</div>
 <script>
 const $=id=>document.getElementById(id), B='https://unidata-nexrad-level2.s3.amazonaws.com/';
-const RAW=`KNKX 32.919 -117.042;KSOX 33.818 -117.636;KVTX 34.412 -119.179;KMUX 37.155 -121.898;KDAX 38.501 -121.678;KRTX 45.715 -122.965;KATX 48.195 -122.496;KOTX 47.680 -117.627;KFSX 34.574 -111.198;KIWA 33.289 -111.670;KMTX 41.263 -112.448;KFTG 39.787 -104.546;KABX 35.150 -106.824;KEPZ 31.873 -106.698;KEWX 29.704 -98.029;KFWS 32.573 -97.303;KTLX 35.333 -97.278;KHGX 29.472 -95.079;KLOT 41.604 -88.085;KMPX 44.849 -93.566;KDVN 41.612 -90.581;KEAX 38.810 -94.264;KILX 40.151 -89.337;KDTX 42.700 -83.472;KCLE 41.413 -81.860;KOKX 40.866 -72.864;KDIX 39.947 -74.411;KLWX 38.975 -77.478;KFFC 33.364 -84.566;KAMX 25.611 -80.413;KTBW 27.705 -82.402;KJAX 30.485 -81.702;KBOX 41.956 -71.137`;
-const ST={};RAW.split(';').forEach(s=>{const [i,a,o]=s.split(' ');ST[i]={lat:+a,lon:+o};$('stn').add(new Option(i,i))});
+const RAW=`KNKX 32.919 -117.042 San Diego, CA;KSOX 33.818 -117.636 Santa Ana Mtns, CA;KVTX 34.412 -119.179 Los Angeles, CA;KMUX 37.155 -121.898 San Francisco, CA;KDAX 38.501 -121.678 Sacramento, CA;KRTX 45.715 -122.965 Portland, OR;KATX 48.195 -122.496 Seattle, WA;KOTX 47.680 -117.627 Spokane, WA;KFSX 34.574 -111.198 Flagstaff, AZ;KIWA 33.289 -111.670 Phoenix, AZ;KMTX 41.263 -112.448 Salt Lake City, UT;KFTG 39.787 -104.546 Denver, CO;KABX 35.150 -106.824 Albuquerque, NM;KEPZ 31.873 -106.698 El Paso, TX;KEWX 29.704 -98.029 Austin/San Antonio, TX;KFWS 32.573 -97.303 Dallas/Fort Worth, TX;KTLX 35.333 -97.278 Oklahoma City, OK;KHGX 29.472 -95.079 Houston, TX;KLOT 41.604 -88.085 Chicago, IL;KMPX 44.849 -93.566 Minneapolis, MN;KDVN 41.612 -90.581 Quad Cities, IA;KEAX 38.810 -94.264 Kansas City, MO;KILX 40.151 -89.337 Lincoln, IL;KDTX 42.700 -83.472 Detroit, MI;KCLE 41.413 -81.860 Cleveland, OH;KOKX 40.866 -72.864 New York, NY;KDIX 39.947 -74.411 Philadelphia, PA;KLWX 38.975 -77.478 Sterling, VA;KFFC 33.364 -84.566 Atlanta, GA;KAMX 25.611 -80.413 Miami, FL;KTBW 27.705 -82.402 Tampa, FL;KJAX 30.485 -81.702 Jacksonville, FL;KBOX 41.956 -71.137 Boston, MA;KABR 45.456 -98.413 Aberdeen, SD`;
+const ST={};RAW.split(';').forEach(s=>{const [i,a,o,...n]=s.split(' ');ST[i]={lat:+a,lon:+o,name:n.join(' ')};$('stn').add(new Option(i+' · '+n.join(' '),i))});
 $('stn').value='KNKX';
 
 //BZ-START  minimal bzip2 decoder
@@ -78,7 +110,7 @@ function bunzip(src){
 
 // ---- NEXRAD Level 2 reflectivity (msg 31, REF) -> polar cells [az,range km,elev,dBZ,azWidth,gateKm]
 function parseL2(buf){
- const u8=new Uint8Array(buf),dv=new DataView(buf),by={},seen={},ec={};let p=24;
+ let vcp=null;const u8=new Uint8Array(buf),dv=new DataView(buf),by={},seen={},ec={};let p=24;
  while(p+4<=u8.length){
   const sz=Math.abs(dv.getInt32(p));p+=4;if(!sz)break;
   let d;try{d=bunzip(u8.subarray(p,p+sz))}catch(e){break}p+=sz;
@@ -89,7 +121,7 @@ function parseL2(buf){
     const m=o+28,az=v.getFloat32(m+12),el=v.getFloat32(m+24),en=d[m+22],nb=v.getUint16(m+30),aw=d[m+20]==1?0.5:1,k=Math.round(el*10);
     if(seen[k]===undefined)seen[k]=en;          // skip repeated (SAILS/MESO) cuts at same elevation
     if(seen[k]===en)for(let i=0;i<Math.min(nb,9);i++){
-     const b=m+v.getUint32(m+32+4*i);
+     const b=m+v.getUint32(m+32+4*i);if(d[b+1]==86&&d[b+2]==79&&d[b+3]==76)vcp=v.getUint16(b+40);
      if(d[b]==68&&d[b+1]==82&&d[b+2]==69&&d[b+3]==70&&d[b+19]==8){
       const e1=ec[en]||(ec[en]={s:0,n:0});e1.s+=el;e1.n++;
       const ng=v.getUint16(b+8),f0=v.getUint16(b+10),gs=v.getUint16(b+12)/1000,sc=v.getFloat32(b+20),of=v.getFloat32(b+24);
@@ -106,7 +138,7 @@ function parseL2(buf){
  const ens=Object.keys(ec).sort((a,b)=>ec[a].s/ec[a].n-ec[b].s/ec[b].n),out=[],tilts=[];
  for(const en of ens){const el=ec[en].s/ec[en].n,a=by[en]||[],start=out.length/6;
   for(let q=0;q<a.length;q++)out.push(q%6==2?el:a[q]);tilts.push({el,start,n:a.length/6})}   // one exact elevation per cut -> clean cone
- return {cells:new Float32Array(out),tilts};
+ return {cells:new Float32Array(out),tilts,vcp:vcp>0&&vcp<1000?vcp:null};
 }
 
 const COL=['#04e9e7','#019ff4','#0300f4','#02fd02','#01c501','#008e00','#fdf802','#fd9500','#fd0000','#bc0000','#f800fd','#ffffff'];
@@ -153,13 +185,20 @@ function upload(cells){
  nCells=cells.length/6;
 }
 
-let allCells=new Float32Array(0),tiltList=[];
+let allCells=new Float32Array(0),tiltList=[],vcp=null,vt=null,nextAt=Date.now()+3e5;
 function curRange(){const T=+$('tilt').value,t=tiltList.find(e=>Math.abs(e.el-T)<.06);return T>=0&&t?t:{start:0,n:allCells.length/6}}
 function fillTilts(t){
  const sel=$('tilt'),old=+sel.value,had=sel.dataset.set;tiltList=t;
  sel.innerHTML='<option value="-1">All tilts</option>'+t.map(e=>`<option value="${e.el}">${e.el.toFixed(1)}°</option>`).join('');
- const m=t.find(e=>Math.abs(e.el-old)<.15);sel.value=m?m.el:(had&&old==-1)||!t.length?-1:t[0].el;sel.dataset.set=1;
+ const m=t.find(e=>Math.abs(e.el-old)<.15);sel.value=m?m.el:(had&&old==-1)||!t.length?-1:t[0].el;sel.dataset.set=1;chips();
 }
+function chips(){const sel=$('tilt'),box=$('chips');box.innerHTML='';
+ for(const o of sel.options){const b=document.createElement('button'),T=+o.value;b.textContent=T<0?'All':T.toFixed(1)+'°';if(o.value==sel.value)b.className='on';b.onclick=()=>{sel.value=o.value;drawPPI();chips()};box.append(b)}
+ const T=+sel.value;$('prod').textContent='BR '+(T<0?'all tilts':T.toFixed(3)+'°')}
+function info(){const s=$('stn').value,n=Math.max(0,Math.round((nextAt-Date.now())/1e3));
+ $('iStn').textContent=s+' '+ST[s].name;$('iVcp').textContent=vcp??'—';
+ $('iVT').textContent=vt?'VT: '+new Date(vt).toISOString().substr(11,8)+'Z':'VT: —';
+ $('iNext').textContent='Next update: '+String(n/60|0).padStart(2,'0')+':'+String(n%60).padStart(2,'0')}
 function drawPPI(){   // polar minimap of the selected tilt (lowest tilt when "All")
  const T=+$('tilt').value,rg=T<0&&tiltList.length?tiltList[0]:curRange(),c=ppiImg.getContext('2d'),sc=150/230,rd=Math.PI/180,P=COL.map(()=>new Path2D()),A=allCells;
  for(let i=rg.start*6;i<(rg.start+rg.n)*6;i+=6){
@@ -169,7 +208,7 @@ function drawPPI(){   // polar minimap of the selected tilt (lowest tilt when "A
  c.clearRect(0,0,300,300);P.forEach((q,b)=>{c.fillStyle=COL[b];c.fill(q)});
 }
 async function load(){
- const id=$('stn').value;$st.textContent='Loading '+id+'…';
+ nextAt=Date.now()+3e5;const id=$('stn').value;$st.textContent='Loading '+id+'…';
  try{
   let key;
   for(let k=0;k<2&&!key;k++){
@@ -183,9 +222,9 @@ async function load(){
   let buf=await(await fetch(B+key)).arrayBuffer();
   const a=new Uint8Array(buf);
   if(a[0]==0x1f&&a[1]==0x8b)buf=await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-  const {cells,tilts}=parseL2(buf);
+  const {cells,tilts,vcp:vc}=parseL2(buf);vcp=vc;
   if(gl)upload(cells);allCells=cells;fillTilts(tilts);drawPPI();
-  scanKey=key.split('/').pop();
+  scanKey=key.split('/').pop();const mm=scanKey.match(/(\d{4})(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)/);vt=mm?Date.UTC(+mm[1],mm[2]-1,+mm[3],+mm[4],+mm[5],+mm[6]):null;info();
  }catch(e){scanKey='';$st.textContent='Error: '+e.message}
 }
 
@@ -236,7 +275,7 @@ $('loc').onclick=()=>{
  if(v){const [a,o]=v.split(',').map(Number);if(isFinite(a)&&isFinite(o)){user={lat:a,lon:o};gps='manual location';return}}
  startGeo();
 };
-$('tilt').onchange=drawPPI;$('stn').onchange=()=>{chosen=true;load()};setInterval(load,300000);load();
+$('tilt').onchange=drawPPI;$('stn').onchange=()=>{chosen=true;load()};load();setInterval(()=>{if(Date.now()>=nextAt)load();info()},1000);
 
 // ---- render
 function sunPos(dt,lat,lon){
@@ -280,7 +319,7 @@ function frame(){
  const sp=sunPos(new Date(),u.lat,u.lon);
  if(sp.alt>-2){const ca=Math.cos(sp.alt*Math.PI/180),q2=pr([Math.sin(sp.az*Math.PI/180)*ca,Math.cos(sp.az*Math.PI/180)*ca,Math.sin(sp.alt*Math.PI/180)]);if(q2){hx.fillStyle='#ffd400';hx.beginPath();hx.arc(q2[0],q2[1],16,0,7);hx.fill();hx.stroke();hx.fillStyle='#fff';hx.strokeText('SUN',q2[0],q2[1]+34);hx.fillText('SUN',q2[0],q2[1]+34)}}
  const hd=(curHd=(Math.atan2(f[0],f[1])*180/Math.PI+360)%360),br=(Math.atan2(dE,dN)*180/Math.PI+360)%360;
- if(scanKey)$st.textContent=`${$('stn').value} ${Math.hypot(dE,dN).toFixed(0)} km @ ${br.toFixed(0)}° · facing ${hd.toFixed(0)}° · pitch ${(Math.asin(f[2])*180/Math.PI).toFixed(0)}° · ${gps} · sun ${sp.az.toFixed(0)}°/${sp.alt.toFixed(0)}° up · ${scanKey}${sensors?'':' · drag to look'}`;
+ if(scanKey)$st.textContent=`${hd.toFixed(0)}°  pitch ${(Math.asin(f[2])*180/Math.PI).toFixed(0)}°  │  ${$('stn').value} ${br.toFixed(0)}°/${Math.hypot(dE,dN).toFixed(1)} km  │  ${gps}  │  ☀ ${sp.az.toFixed(0)}°/${sp.alt.toFixed(0)}°${sensors?'':'  │  drag to look'}`;
  // polar PPI
  pc.clearRect(0,0,300,300);pc.drawImage(ppiImg,0,0);
  pc.strokeStyle='#fff6';pc.lineWidth=1;for(const rr of[50,100,150,200]){pc.beginPath();pc.arc(150,150,rr*150/230,0,7);pc.stroke()}
@@ -290,5 +329,10 @@ function frame(){
  pc.fillStyle='#fff';pc.font='14px sans-serif';pc.textAlign='left';pc.fillText('N',143,14);
  requestAnimationFrame(frame);
 }
+$('lb').innerHTML=COL.map((c,b)=>`<div class="q"><b style="background:${c}"></b><span>${15+5*b}</span></div>`).reverse().join('');
+$('fov').oninput=$('yaw').oninput=()=>{$('fovo').textContent=$('fov').value+'°';$('yawo').textContent=$('yaw').value+'°'};
+$('gear').onclick=()=>{$('sheet').hidden=!$('sheet').hidden};
+addEventListener('click',e=>{if(!e.target.closest('#sheet,#gear'))$('sheet').hidden=true});
+info();
 frame();
 </script></body></html>
