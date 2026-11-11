@@ -16,7 +16,7 @@ select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28p
 #ttl{flex:1;text-align:center;font-weight:600;font-size:15px}
 #prods{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;touch-action:pan-x}
 #prods button{flex:none;font-weight:600}#prods button.on{background:var(--blue)}#prods button:disabled{opacity:.35}
-#prods i{width:1px;background:var(--sep);flex:none;margin:2px}#chips{display:contents}
+#prods i{width:1px;background:var(--sep);flex:none;margin:2px}#chips,#pbtn{display:contents}
 #info,#info2{top:calc(var(--st) + 104px);padding:6px 10px;font-size:12px;line-height:1.4}
 #info{left:8px}#info2{right:8px;text-align:right}
 #leg{left:8px;top:50%;transform:translateY(-50%);padding:6px;font-size:11px}
@@ -26,17 +26,17 @@ select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28p
 #st{left:8px;right:8px;bottom:var(--sb);padding:11px 14px;font-size:12px;white-space:nowrap;overflow-x:auto;scrollbar-width:none}
 #ppi{position:fixed;right:8px;bottom:calc(var(--sb) + 48px);width:150px;height:150px;border-radius:50%;background:rgba(0,0,0,.45);border:.5px solid var(--sep);z-index:3}
 #go{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:6;background:var(--blue);font-size:17px;font-weight:600;padding:14px 30px;box-shadow:0 8px 30px #0008}
-#sheet{left:50%;transform:translateX(-50%);width:min(420px,calc(100% - 16px));bottom:calc(var(--sb) + 48px);z-index:5;overflow:hidden}
+#sheet{left:50%;transform:translateX(-50%);width:min(420px,calc(100% - 16px));bottom:calc(var(--sb) + 48px);z-index:5;max-height:58vh;overflow-y:auto}
 #sheet .row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:.5px solid var(--sep)}
 #sheet .row:first-child{border-top:0}#sheet .row span{flex:1}#sheet .row button{flex:1}
 #sheet input{flex:2;accent-color:var(--blue)}#sheet output{width:44px;text-align:right;color:#aaa}
-#sheet input.sw{-webkit-appearance:none;appearance:none;flex:none;width:51px;height:31px;border-radius:16px;background:#39393d;position:relative;transition:.2s}#sheet input.sw::after{content:'';position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;transition:.2s}#sheet input.sw:checked{background:#34C759}#sheet input.sw:checked::after{left:22px}
+#sheet input[type=number]{flex:none;width:64px;background:var(--fill);color:#fff;border:0;border-radius:8px;padding:6px;font:inherit;text-align:right}#sheet input.sw{-webkit-appearance:none;appearance:none;flex:none;width:51px;height:31px;border-radius:16px;background:#39393d;position:relative;transition:.2s}#sheet input.sw::after{content:'';position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;transition:.2s}#sheet input.sw:checked{background:#34C759}#sheet input.sw:checked::after{left:22px}
 </style></head><body>
 <video id="cam" playsinline muted autoplay></video>
 <canvas id="ar"></canvas><canvas id="hud"></canvas>
 <div id="top" class="glass">
  <div class="r"><select id="stn" aria-label="Radar station"></select><div id="ttl">AR1Analyst</div><button id="gear" aria-label="Settings">⚙︎</button></div>
- <div id="prods"><button class="on">BR</button><button disabled>BV</button><button disabled>SRV</button><button disabled>CC</button><i></i><span id="chips"></span></div>
+ <div id="prods"><span id="pbtn"></span><i></i><span id="chips"></span></div>
  <select id="tilt" hidden><option value="-1">All tilts</option></select>
 </div>
 <div id="info" class="glass"><b id="iStn"></b><br>VCP: <span id="iVcp">—</span></div>
@@ -52,6 +52,8 @@ select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28p
  <div class="row"><span>Smoothing</span><input id="smooth" class="sw" type="checkbox" checked></div>
  <div class="row"><span>Clear-air echoes</span><input id="weak" class="sw" type="checkbox"></div>
  <div class="row"><span>Opacity</span><input id="op" type="range" min="20" max="100" value="75"><output id="opo">75%</output></div>
+ <div class="row"><span>Color table</span><button id="palbtn">Upload…</button><button id="palreset">Reset</button><input id="palfile" type="file" accept=".pal,.pal3,.txt,.csv,text/plain" multiple hidden></div>
+ <div class="row"><span>Storm motion (SRV)</span><input id="sdir" type="number" value="240" title="from °"><input id="sspd" type="number" value="0" title="kt"></div>
  <div class="row"><button id="cal">🧭 Calibrate heading</button></div>
  <div class="row"><button id="loc">📍 Set location</button></div>
 </div>
@@ -112,6 +114,7 @@ function bunzip(src){
 //BZ-END
 
 // ---- NEXRAD Level 2 reflectivity (msg 31, REF) -> polar cells [az,range km,elev,dBZ,azWidth,gateKm]
+const MOM={REF:1,VEL:1,SW:1,ZDR:1,PHI:1,RHO:1};
 function parseL2(buf){
  let vcp=null;const u8=new Uint8Array(buf),dv=new DataView(buf),cuts={},seen={};let p=24;
  while(p+4<=u8.length){
@@ -122,27 +125,59 @@ function parseL2(buf){
    const size=v.getUint16(o+12);if(!size)break;
    if(d[o+15]==31){
     const m=o+28,az=v.getFloat32(m+12),el=v.getFloat32(m+24),en=d[m+22],nb=v.getUint16(m+30),aw=d[m+20]==1?0.5:1,k=Math.round(el*10);
-    if(seen[k]===undefined)seen[k]=en;          // skip repeated (SAILS/MESO) cuts at same elevation
-    if(seen[k]===en)for(let i=0;i<Math.min(nb,9);i++){
-     const b=m+v.getUint32(m+32+4*i);if(d[b+1]==86&&d[b+2]==79&&d[b+3]==76)vcp=v.getUint16(b+40);
-     if(d[b]==68&&d[b+1]==82&&d[b+2]==69&&d[b+3]==70&&d[b+19]==8){
-      const ng=v.getUint16(b+8);let c=cuts[en];
-      if(!c){const N=Math.round(360/aw);c=cuts[en]={es:0,cnt:0,N,aw,ng,r0:v.getUint16(b+10)/1000,gs:v.getUint16(b+12)/1000,sc:v.getFloat32(b+20),off:v.getFloat32(b+24),data:new Uint8Array(N*ng*2)}}
-      c.es+=el;c.cnt++;
-      const idx=Math.round(az/c.aw)%c.N,n=Math.min(ng,c.ng);
-      for(let g=0;g<n;g++){const raw=d[b+28+g];if(raw>=2){const q=(g*c.N+idx)*2;c.data[q]=raw;c.data[q+1]=255}}   // R=raw, G=valid
-     }
+    for(let i=0;i<Math.min(nb,9);i++){
+     const b=m+v.getUint32(m+32+4*i);
+     if(d[b+1]==86&&d[b+2]==79&&d[b+3]==76)vcp=v.getUint16(b+40);
+     if(d[b]!=68||d[b+19]!=8)continue;
+     const nm=String.fromCharCode(d[b+1],d[b+2],d[b+3]).trim();if(!MOM[nm])continue;
+     const sk=nm+k;if(seen[sk]===undefined)seen[sk]=en;if(seen[sk]!==en)continue;   // first cut per product+elevation (skips SAILS repeats)
+     const ng=v.getUint16(b+8),ck=nm+en;let c=cuts[ck];
+     if(!c){const N=Math.round(360/aw);c=cuts[ck]={nm,es:0,cnt:0,N,aw,ng,r0:v.getUint16(b+10)/1000,gs:v.getUint16(b+12)/1000,sc:v.getFloat32(b+20),off:v.getFloat32(b+24),data:new Uint8Array(N*ng*2)}}
+     c.es+=el;c.cnt++;
+     const idx=Math.round(az/c.aw)%c.N,n=Math.min(ng,c.ng);
+     for(let g=0;g<n;g++){const raw=d[b+28+g];if(raw>=2){const q=(g*c.N+idx)*2;c.data[q]=raw;c.data[q+1]=255}}   // R=raw, G=valid
     }
     o+=12+size*2;
    }else o+=2432;
   }
  }
- const tilts=Object.values(cuts).map(c=>(c.el=c.es/c.cnt,c)).sort((a,b)=>a.el-b.el);
- return {tilts,vcp:vcp>0&&vcp<1000?vcp:null};
+ const prods={};for(const c of Object.values(cuts)){c.el=c.es/c.cnt;(prods[c.nm]||(prods[c.nm]=[])).push(c)}
+ for(const k in prods)prods[k].sort((a,b)=>a.el-b.el);
+ return {prods,vcp:vcp>0&&vcp<1000?vcp:null};
 }
 
-// ---- color table (GR palette format): "color: v r g b [r2 g2 b2]" = gradient to next stop; color4 adds alpha
-const PALTXT=`color4: -30 116 78 173 0 147 141 117 255
+// ---- color tables (GR palette format). "color: v r g b [r2 g2 b2]" blends to the next stop; color4/solidcolor supported.
+//      Scale/Offset convert data -> palette units (e.g. m/s -> kts); values below the first stop are not drawn.
+function buildPal(txt){
+ const P={scale:1,offset:0,step:5,units:''},S=[];
+ for(let L of txt.split(/\r?\n/)){L=L.trim();if(!L||L[0]==';'||L.startsWith('//'))continue;
+  const c=L.indexOf(':');if(c<0)continue;const k=L.slice(0,c).trim().toLowerCase(),r=L.slice(c+1).trim();
+  if(k=='product')P.product=r.split(/\s+/)[0].toUpperCase();else if(k=='units')P.units=r;
+  else if(k=='scale')P.scale=+r||1;else if(k=='offset')P.offset=+r||0;else if(k=='step')P.step=+r||5;
+  else if(/^(solid)?color4?$/.test(k)){const n=r.split(/\s+/).map(Number),a4=k.endsWith('4'),w=a4?4:3,f=q=>q.length==w?[q[0],q[1],q[2],a4?q[3]:255]:null;
+   if(n.slice(0,1+w).some(isNaN))continue;S.push({v:n[0],c1:f(n.slice(1,1+w)),c2:k.startsWith('solid')?null:f(n.slice(1+w,1+2*w))})}}
+ if(S.length<2)throw new Error('no color lines found');
+ S.sort((a,b)=>a.v-b.v);P.lo=S[0].v;P.hi=S[S.length-1].v;P.rgba=new Uint8Array(512*4);
+ for(let i=0;i<512;i++){const x=P.lo+(P.hi-P.lo)*i/511;let s=0;while(s<S.length-1&&S[s+1].v<=x)s++;
+  const a=S[s],b=S[s+1];let c=a.c1;if(a.c2&&b){const t=(x-a.v)/(b.v-a.v);c=a.c1.map((q,z)=>q+(a.c2[z]-q)*t)}
+  P.rgba.set(c.map(Math.round),i*4)}
+ return P;
+}
+const VELP=`units: KTS
+scale: 1.94384
+step: 10
+color: -100 0 255 255 0 120 0
+color: -50 0 255 0 0 130 0
+color: -10 0 130 0 110 110 110
+color: 0 110 110 110 140 0 0
+color: 10 140 0 0 255 0 0
+color: 50 255 0 0 255 200 0
+color: 100 255 200 0 255 255 255`;
+const DEF={
+BR:`product: BR
+units: dBZ
+step: 5
+color4: -30 116 78 173 0 147 141 117 255
 color: -20 150 145 83 210 212 180
 color: -10 204 207 180 65 91 158
 color: 10 67 97 162 106 208 228
@@ -156,15 +191,50 @@ color: 65 255 117 255 225 11 227
 color: 70 178 0 255 99 0 214
 color: 75 5 236 240 1 32 32
 color: 85 1 32 32
-color: 95 1 32 32`;
-const PAL=(()=>{const S=[];
- for(const L of PALTXT.split('\n')){const [k,rest]=L.split(':'),n=rest.trim().split(/\s+/).map(Number),a4=k.trim()=='color4',w=a4?4:3;
-  const f=c=>c?[c[0],c[1],c[2],a4?c[3]:255]:null;S.push({v:n[0],c1:f(n.slice(1,1+w)),c2:n.length>=1+2*w?f(n.slice(1+w,1+2*w)):null})}
- const out=new Uint8Array(512*4);                      // 512 samples over -30..95 dBZ
- for(let i=0;i<512;i++){const x=-30+125*i/511;let s=0;while(s<S.length-1&&S[s+1].v<=x)s++;
-  const a=S[s],b=S[s+1];let c=a.c1;if(a.c2&&b){const t=(x-a.v)/(b.v-a.v);c=a.c1.map((q,z)=>q+(a.c2[z]-q)*t)}
-  out.set(c.map(Math.round),i*4)}
- return out})();
+color: 95 1 32 32`,
+BV:'product: BV\n'+VELP,SRV:'product: SRV\n'+VELP,
+SW:`product: SW
+units: KTS
+scale: 1.94384
+step: 5
+color: 0 60 60 60 40 40 200
+color: 5 40 40 200 0 200 0
+color: 10 0 200 0 255 255 0
+color: 20 255 255 0 255 0 0
+color: 30 255 0 0 255 255 255
+color: 40 255 255 255`,
+ZDR:`product: ZDR
+units: dB
+step: 1
+color: -8 40 40 40 120 120 120
+color: -2 120 120 120 0 110 220
+color: 0 0 110 220 0 200 0
+color: 1 0 200 0 255 255 0
+color: 2 255 255 0 255 128 0
+color: 3 255 128 0 255 0 0
+color: 5 255 0 0 255 0 255
+color: 8 255 0 255`,
+CC:`product: CC
+step: 0.1
+color: 0.2 70 70 70 130 80 170
+color: 0.7 130 80 170 0 120 220
+color: 0.85 0 120 220 0 200 0
+color: 0.92 0 200 0 255 255 0
+color: 0.97 255 255 0 255 120 0
+color: 1 255 120 0 255 0 0
+color: 1.05 255 0 0`,
+PHI:`product: PHI
+units: deg
+step: 30
+color: 0 0 0 0 0 0 255
+color: 90 0 0 255 0 255 0
+color: 180 0 255 0 255 255 0
+color: 270 255 255 0 255 0 0
+color: 360 255 0 0`};
+const PRODS={BR:'REF',BV:'VEL',SRV:'VEL',SW:'SW',ZDR:'ZDR',CC:'RHO',PHI:'PHI'},ALIAS={REF:'BR',VEL:'BV',RHO:'CC'};
+const PALS={};for(const k in DEF)PALS[k]=buildPal(DEF[k]);
+try{for(const k in DEF){const s=localStorage.getItem('ar1pal:'+k);if(s)PALS[k]=buildPal(s)}}catch(e){}
+
 const $st=$('st'),ppiImg=document.createElement('canvas');ppiImg.width=ppiImg.height=300;
 let user=null,gps='GPS: tap Start AR',sensors=false,abs=false,corr=0,chosen=false,scanKey='',nCells=0,yaw=0,pitch=0;
 let basis={r:[1,0,0],u:[0,0,1],f:[0,1,0]};
@@ -187,18 +257,20 @@ void main(){
  gl_Position=vec4(dot(p,R)*S.x, dot(p,Up)*S.y, 0., dot(p,Fw));
  vP=P;}`));
  gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,`#version 300 es
-precision highp float; in vec2 vP; uniform sampler2D D,Pal; uniform vec4 G,Q; uniform float Mn,Op; out vec4 o;
+precision highp float; in vec2 vP; uniform sampler2D D,Pal; uniform vec4 G,Q,PL; uniform vec3 SR; uniform float Mn,Op; out vec4 o;
 void main(){
  float j=(vP.y-G.x)/G.y; if(j<-.5||j>G.z-.5)discard;
  float N=360./Q.x;
  vec2 t=texture(D,vec2((vP.x/Q.x+.5)/N,(j+.5)/G.z)).rg;
  if(t.g<.02)discard;
- float dbz=(t.r/t.g*255.-Q.z)/Q.y; if(dbz<Mn)discard;
- vec4 c=texture(Pal,vec2(clamp((dbz+30.)/125.,0.,1.),.5));
+ float v=(t.r/t.g*255.-Q.z)/Q.y; if(v<Mn)discard;
+ if(SR.z>0.) v-=SR.x*cos(radians(vP.x-SR.y));
+ v=v*PL.z+PL.w; if(v<PL.x)discard;
+ vec4 c=texture(Pal,vec2(clamp((v-PL.x)/(PL.y-PL.x),0.,1.),.5));
  float a=c.a*Op*smoothstep(0.,.7,t.g);
  o=vec4(c.rgb*a,a);}`));
  gl.linkProgram(prog);
- for(const n of['U','S','R','Up','Fw','E','G','Q','Mn','Op','D','Pal'])loc[n]=gl.getUniformLocation(prog,n);
+ for(const n of['U','S','R','Up','Fw','E','G','Q','Mn','Op','D','Pal','PL','SR'])loc[n]=gl.getUniformLocation(prog,n);
  const NA=361,NR=93,V=new Float32Array(NA*NR*2),I=new Uint16Array((NA-1)*(NR-1)*6);let k=0;   // az 0..360 x range 0..460 km
  for(let j=0;j<NR;j++)for(let i=0;i<NA;i++){V[k++]=i;V[k++]=j*5}
  k=0;for(let j=0;j<NR-1;j++)for(let i=0;i<NA-1;i++){const a=j*NA+i,b=a+1,c=a+NA,d=c+1;I.set([a,b,c,b,d,c],k);k+=6}
@@ -206,55 +278,76 @@ void main(){
  gl.bindBuffer(gl.ARRAY_BUFFER,gl.createBuffer());gl.bufferData(gl.ARRAY_BUFFER,V,gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,gl.createBuffer());gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,I,gl.STATIC_DRAW);
  palTex=gl.createTexture();gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,palTex);
- gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,512,1,0,gl.RGBA,gl.UNSIGNED_BYTE,PAL);
+ gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,512,1,0,gl.RGBA,gl.UNSIGNED_BYTE,PALS.BR.rgba);
  for(const [a,b] of[[gl.TEXTURE_MIN_FILTER,gl.LINEAR],[gl.TEXTURE_MAG_FILTER,gl.LINEAR],[gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE],[gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE]])gl.texParameteri(gl.TEXTURE_2D,a,b);
  gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
 }
+const allCuts=()=>Object.values(P).flat();
 function setFilter(){const f=$('smooth').checked?gl.LINEAR:gl.NEAREST;gl.activeTexture(gl.TEXTURE0);
- for(const c of tiltList){gl.bindTexture(gl.TEXTURE_2D,c.tex);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,f);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,f)}}
-function uploadCuts(t){
- gl.activeTexture(gl.TEXTURE0);gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
- for(const o of tiltList)if(o.tex)gl.deleteTexture(o.tex);
- for(const c of t){c.tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,c.tex);
+ for(const c of allCuts())if(c.tex){gl.bindTexture(gl.TEXTURE_2D,c.tex);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,f);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,f)}}
+function freeTex(){for(const c of allCuts())if(c.tex)gl.deleteTexture(c.tex)}
+function ensureTex(){   // textures are created lazily for the product on screen
+ gl.activeTexture(gl.TEXTURE0);gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);let n=0;
+ for(const c of tiltList)if(!c.tex){c.tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,c.tex);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.RG8,c.N,c.ng,0,gl.RG,gl.UNSIGNED_BYTE,c.data);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE)}
- tiltList=t;setFilter();
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);n++}
+ if(n)setFilter();
 }
+function setPalTex(){gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,palTex);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,512,1,0,gl.RGBA,gl.UNSIGNED_BYTE,PALS[curCode].rgba)}
+const srv=()=>[(+$('sspd').value||0)*.514444,((+$('sdir').value||0)+180)%360,curCode=='SRV'?1:0];
+const curCut=()=>{const T=+$('tilt').value;return T<0?tiltList[0]:tiltList.find(e=>Math.abs(e.el-T)<.06)};   // lowest tilt when "All"
+const minV=()=>curCode=='BR'?($('weak').checked?-30:5):-1e9;
 function drawCones(dE,dN,W,H,F,r,up,f){
  gl.viewport(0,0,cv.width,cv.height);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
+ const pl=PALS[curCode],sr=srv();
  gl.useProgram(prog);gl.bindVertexArray(vao);
  gl.uniform2f(loc.U,dE,dN);gl.uniform2f(loc.S,2*F/W,2*F/H);gl.uniform3fv(loc.R,r);gl.uniform3fv(loc.Up,up);gl.uniform3fv(loc.Fw,f);
- gl.uniform1f(loc.Mn,$('weak').checked?-30:5);gl.uniform1f(loc.Op,$('op').value/100);gl.uniform1i(loc.D,0);gl.uniform1i(loc.Pal,1);
+ gl.uniform1f(loc.Mn,minV());gl.uniform1f(loc.Op,$('op').value/100);gl.uniform1i(loc.D,0);gl.uniform1i(loc.Pal,1);
+ gl.uniform4f(loc.PL,pl.lo,pl.hi,pl.scale,pl.offset);gl.uniform3f(loc.SR,sr[0],sr[1],sr[2]);
  gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,palTex);gl.activeTexture(gl.TEXTURE0);
  const T=+$('tilt').value;
- for(const c of tiltList){if(T>=0&&Math.abs(c.el-T)>.06)continue;
+ for(const c of tiltList){if(T>=0&&Math.abs(c.el-T)>.06||!c.tex)continue;
   gl.bindTexture(gl.TEXTURE_2D,c.tex);gl.uniform1f(loc.E,c.el);gl.uniform4f(loc.G,c.r0,c.gs,c.ng,0);gl.uniform4f(loc.Q,c.aw,c.sc,c.off,0);
   gl.drawElements(gl.TRIANGLES,nIdx,gl.UNSIGNED_SHORT,0)}
 }
-let tiltList=[],vcp=null,vt=null,nextAt=Date.now()+3e5;
+let P={},curCode='BR',ppiR=230,tiltList=[],vcp=null,vt=null,nextAt=Date.now()+3e5,toast='',toastUntil=0;
+const say=m=>{toast=m;toastUntil=Date.now()+6000};
 function fillTilts(t){
- const sel=$('tilt'),old=+sel.value,had=sel.dataset.set;tiltList=t;
+ const sel=$('tilt'),old=+sel.value,had=sel.dataset.set;
  sel.innerHTML='<option value="-1">All tilts</option>'+t.map(e=>`<option value="${e.el}">${e.el.toFixed(1)}°</option>`).join('');
  const m=t.find(e=>Math.abs(e.el-old)<.15);sel.value=m?m.el:(had&&old==-1)||!t.length?-1:t[0].el;sel.dataset.set=1;chips();
 }
 function chips(){const sel=$('tilt'),box=$('chips');box.innerHTML='';
  for(const o of sel.options){const b=document.createElement('button'),T=+o.value;b.textContent=T<0?'All':T.toFixed(1)+'°';if(o.value==sel.value)b.className='on';b.onclick=()=>{sel.value=o.value;drawPPI();chips()};box.append(b)}
- const T=+sel.value;$('prod').textContent='BR '+(T<0?'all tilts':T.toFixed(3)+'°')}
+ const T=+sel.value;$('prod').textContent=curCode+' '+(T<0?'all tilts':T.toFixed(3)+'°')}
 function info(){const s=$('stn').value,n=Math.max(0,Math.round((nextAt-Date.now())/1e3));
  $('iStn').textContent=s+' '+ST[s].name;$('iVcp').textContent=vcp??'—';
  $('iVT').textContent=vt?'VT: '+new Date(vt).toISOString().substr(11,8)+'Z':'VT: —';
  $('iNext').textContent='Next update: '+String(n/60|0).padStart(2,'0')+':'+String(n%60).padStart(2,'0')}
-function drawPPI(){   // polar minimap of the selected tilt (lowest when "All"), colored by the palette
- const c=ppiImg.getContext('2d'),im=c.createImageData(300,300),T=+$('tilt').value,t=T<0?tiltList[0]:tiltList.find(e=>Math.abs(e.el-T)<.06),mn=$('weak').checked?-30:5;
+function drawPPI(){   // polar minimap of the selected product/tilt (lowest tilt when "All"), colored by the palette
+ const c=ppiImg.getContext('2d'),im=c.createImageData(300,300),T=+$('tilt').value,t=T<0?tiltList[0]:tiltList.find(e=>Math.abs(e.el-T)<.06),pl=PALS[curCode],mn=minV(),sr=srv();
+ ppiR=t?Math.min(460,t.r0+t.ng*t.gs):230;
  if(t)for(let y=0;y<300;y++)for(let x=0;x<300;x++){
-  const dx=x-150,dy=150-y,rr=Math.hypot(dx,dy)*230/150;if(rr>230)continue;
+  const dx=x-150,dy=150-y,rr=Math.hypot(dx,dy)*ppiR/150;if(rr>ppiR)continue;
   const j=Math.round((rr-t.r0)/t.gs);if(j<0||j>=t.ng)continue;
-  const i=Math.round(((Math.atan2(dx,dy)*180/Math.PI+360)%360)/t.aw)%t.N,q=(j*t.N+i)*2;if(!t.data[q+1])continue;
-  const dbz=(t.data[q]-t.off)/t.sc;if(dbz<mn)continue;
-  const pi=Math.max(0,Math.min(511,Math.round((dbz+30)/125*511)))*4,o=(y*300+x)*4;
-  im.data[o]=PAL[pi];im.data[o+1]=PAL[pi+1];im.data[o+2]=PAL[pi+2];im.data[o+3]=PAL[pi+3]}
+  const az=(Math.atan2(dx,dy)*180/Math.PI+360)%360,i=Math.round(az/t.aw)%t.N,q=(j*t.N+i)*2;if(!t.data[q+1])continue;
+  let v=(t.data[q]-t.off)/t.sc;if(v<mn)continue;
+  if(sr[2])v-=sr[0]*Math.cos((az-sr[1])*Math.PI/180);
+  v=v*pl.scale+pl.offset;if(v<pl.lo)continue;
+  const pi=Math.round(Math.max(0,Math.min(1,(v-pl.lo)/(pl.hi-pl.lo)))*511)*4,o=(y*300+x)*4;
+  im.data[o]=pl.rgba[pi];im.data[o+1]=pl.rgba[pi+1];im.data[o+2]=pl.rgba[pi+2];im.data[o+3]=pl.rgba[pi+3]}
  c.putImageData(im,0,0);
 }
+function buildLegend(){const pl=PALS[curCode],g=[],st=pl.step;
+ for(let k=0;k<=56;k++){const q=Math.round(k/56*511)*4;g.push(`rgba(${pl.rgba[q]},${pl.rgba[q+1]},${pl.rgba[q+2]},${pl.rgba[q+3]/255}) ${k/56*100}%`)}
+ let lab='';for(let d=Math.ceil(pl.lo/st-1e-9)*st;d<=pl.hi+1e-9;d+=st)lab+=`<span style="bottom:${(d-pl.lo)/(pl.hi-pl.lo)*100}%">${+d.toFixed(2)}</span>`;
+ $('leg').querySelector('.h').textContent=pl.units||curCode;
+ $('lb').innerHTML=`<div class="bar" style="background:linear-gradient(to top,${g.join(',')})"></div><div class="lab">${lab}</div>`}
+function prodBtns(){const box=$('pbtn');box.innerHTML='';
+ for(const k in PRODS){const b=document.createElement('button');b.textContent=k;b.disabled=!(P[PRODS[k]]||[]).length;if(k==curCode)b.className='on';b.onclick=()=>setProduct(k);box.append(b)}}
+function setProduct(k){curCode=k;tiltList=P[PRODS[k]]||[];if(gl){ensureTex();setPalTex()}
+ fillTilts(tiltList);buildLegend();prodBtns();drawPPI();
+ if(k=='SRV'&&!(+$('sspd').value))say('SRV: set the storm motion in ⚙︎ settings')}
 async function load(){
  nextAt=Date.now()+3e5;const id=$('stn').value;$st.textContent='Loading '+id+'…';
  try{
@@ -270,8 +363,8 @@ async function load(){
   let buf=await(await fetch(B+key)).arrayBuffer();
   const a=new Uint8Array(buf);
   if(a[0]==0x1f&&a[1]==0x8b)buf=await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-  const {tilts,vcp:vc}=parseL2(buf);vcp=vc;
-  if(gl)uploadCuts(tilts);fillTilts(tilts);drawPPI();
+  const {prods,vcp:vc}=parseL2(buf);vcp=vc;
+  if(gl)freeTex();P=prods;setProduct(P[PRODS[curCode]]&&P[PRODS[curCode]].length?curCode:'BR');
   scanKey=key.split('/').pop();const mm=scanKey.match(/(\d{4})(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)/);vt=mm?Date.UTC(+mm[1],mm[2]-1,+mm[3],+mm[4],+mm[5],+mm[6]):null;info();
  }catch(e){scanKey='';$st.textContent='Error: '+e.message}
 }
@@ -349,32 +442,47 @@ function frame(){
  // HUD: cardinals + station marker
  hx.setTransform(dpr,0,0,dpr,0,0);hx.clearRect(0,0,W,H);hx.font='bold 16px system-ui';hx.textAlign='center';hx.fillStyle='#fff';hx.strokeStyle='#000';hx.lineWidth=3;
  const pr=v=>{const d=dot(v,f);return d>.001?[W/2+F*dot(v,r)/d,H/2-F*dot(v,up)/d]:null};
- {const D=Math.PI/180,Tt=+$('tilt').value,Te=(Tt>=0?Tt:(tiltList[0]?.el??.5))*D,ce=Math.cos(Te),se=Math.sin(Te),az0=Math.atan2(f[0],f[1]);
-  const gp=(az,rg)=>{const s=rg*ce,x=s*Math.sin(az)+dE,y=s*Math.cos(az)+dN;return pr([x,y,rg*se+rg*rg/16990-(x*x+y*y)/12742])};
-  const line=(fn,n)=>{let pen=false;hx.beginPath();for(let i=0;i<=n;i++){const q=fn(i);if(q){pen?hx.lineTo(q[0],q[1]):hx.moveTo(q[0],q[1]);pen=true}else pen=false}hx.stroke()};
-  hx.save();hx.lineWidth=1;hx.strokeStyle='rgba(255,255,255,.5)';hx.fillStyle='#fff';hx.font='12px system-ui';
-  for(let rg=25;rg<=225;rg+=25){line(i=>gp(i*4*D,rg),90);const q=gp(az0,rg);if(q)hx.fillText(rg+' km',q[0],q[1]-4)}
-  for(let a=0;a<360;a+=30)line(i=>gp(a*D,i*5),46);
-  hx.restore()}
+ {const D=Math.PI/180,cut=curCut();
+  if(cut){const Rm=cut.r0+cut.ng*cut.gs,Te=cut.el*D,ce=Math.cos(Te),se=Math.sin(Te),az0=Math.atan2(f[0],f[1]),step=Rm>250?50:25;
+   const gp=(az,rg)=>{const s=rg*ce,x=s*Math.sin(az)+dE,y=s*Math.cos(az)+dN;return pr([x,y,rg*se+rg*rg/16990-(x*x+y*y)/12742])};
+   const line=(fn,n)=>{let pen=false;hx.beginPath();for(let i=0;i<=n;i++){const q=fn(i);if(q){pen?hx.lineTo(q[0],q[1]):hx.moveTo(q[0],q[1]);pen=true}else pen=false}hx.stroke()};
+   hx.save();hx.lineWidth=1;hx.strokeStyle='rgba(255,255,255,.5)';hx.fillStyle='#fff';hx.font='12px system-ui';
+   for(let rg=step;rg<Rm-step*.2;rg+=step){line(i=>gp(i*4*D,rg),90);const q=gp(az0,rg);if(q)hx.fillText(rg+' km',q[0],q[1]-4)}
+   const nS=Math.ceil(Rm/5);for(let a=0;a<360;a+=30)line(i=>gp(a*D,Math.min(i*5,Rm)),nS);   // spokes stop at the tilt's range
+   hx.lineWidth=2;hx.strokeStyle='rgba(255,255,255,.9)';hx.font='bold 12px system-ui';line(i=>gp(i*4*D,Rm),90);   // outer edge = max range
+   {const q=gp(az0,Rm);if(q)hx.fillText(Rm.toFixed(0)+' km',q[0],q[1]-6)}
+   hx.restore()}}
  for(const [t,v] of[['N',[0,1,0]],['E',[1,0,0]],['S',[0,-1,0]],['W',[-1,0,0]]]){const q=pr(v);if(q){hx.strokeText(t,q[0],q[1]);hx.fillText(t,q[0],q[1])}}
  const q=pr([dE,dN,0]);if(q){hx.lineWidth=2;hx.beginPath();hx.arc(q[0],q[1],10,0,7);hx.stroke();hx.strokeStyle='#fff';hx.stroke();hx.strokeStyle='#000';hx.fillText($('stn').value,q[0],q[1]-16)}
  const sp=sunPos(new Date(),u.lat,u.lon);
  if(sp.alt>-2){const ca=Math.cos(sp.alt*Math.PI/180),q2=pr([Math.sin(sp.az*Math.PI/180)*ca,Math.cos(sp.az*Math.PI/180)*ca,Math.sin(sp.alt*Math.PI/180)]);if(q2){hx.fillStyle='#ffd400';hx.beginPath();hx.arc(q2[0],q2[1],16,0,7);hx.fill();hx.stroke();hx.fillStyle='#fff';hx.strokeText('SUN',q2[0],q2[1]+34);hx.fillText('SUN',q2[0],q2[1]+34)}}
  const hd=(curHd=(Math.atan2(f[0],f[1])*180/Math.PI+360)%360),br=(Math.atan2(dE,dN)*180/Math.PI+360)%360;
- if(scanKey)$st.textContent=`${hd.toFixed(0)}°  pitch ${(Math.asin(f[2])*180/Math.PI).toFixed(0)}°  │  ${$('stn').value} ${br.toFixed(0)}°/${Math.hypot(dE,dN).toFixed(1)} km  │  ${gps}  │  ☀ ${sp.az.toFixed(0)}°/${sp.alt.toFixed(0)}°${sensors?'':'  │  drag to look'}`;
+ if(Date.now()<toastUntil)$st.textContent=toast;else if(scanKey)$st.textContent=`${hd.toFixed(0)}°  pitch ${(Math.asin(f[2])*180/Math.PI).toFixed(0)}°  │  ${$('stn').value} ${br.toFixed(0)}°/${Math.hypot(dE,dN).toFixed(1)} km  │  ${gps}  │  ☀ ${sp.az.toFixed(0)}°/${sp.alt.toFixed(0)}°${sensors?'':'  │  drag to look'}`;
  // polar PPI
  pc.clearRect(0,0,300,300);pc.drawImage(ppiImg,0,0);
- pc.strokeStyle='#fff6';pc.lineWidth=1;for(const rr of[50,100,150,200]){pc.beginPath();pc.arc(150,150,rr*150/230,0,7);pc.stroke()}
- const ux=150-dE*150/230,uy=150+dN*150/230,hf=2*Math.atan(W/(2*F)),a=Math.atan2(f[0],f[1]);
+ const sc=150/ppiR,rs=ppiR>250?100:50;
+ pc.strokeStyle='#fff6';pc.lineWidth=1;for(let rr=rs;rr<ppiR-rs*.2;rr+=rs){pc.beginPath();pc.arc(150,150,rr*sc,0,7);pc.stroke()}
+ pc.strokeStyle='#fffc';pc.beginPath();pc.arc(150,150,149,0,7);pc.stroke();   // edge of the data = true range of this tilt
+ const ux=150-dE*sc,uy=150+dN*sc,hf=2*Math.atan(W/(2*F)),a=Math.atan2(f[0],f[1]);
  pc.fillStyle='#ff08';pc.beginPath();pc.moveTo(ux,uy);pc.arc(ux,uy,60,a-hf/2-Math.PI/2,a+hf/2-Math.PI/2);pc.fill();
  pc.fillStyle='#ff0';pc.beginPath();pc.arc(ux,uy,4,0,7);pc.fill();
- pc.fillStyle='#fff';pc.font='14px sans-serif';pc.textAlign='left';pc.fillText('N',143,14);
+ pc.fillStyle='#fff';pc.font='14px sans-serif';pc.textAlign='left';pc.fillText('N',143,14);pc.textAlign='center';pc.fillText(ppiR.toFixed(0)+' km',150,288);
  requestAnimationFrame(frame);
 }
-{const lo=-30,hi=80,st=5,g=[];   // legend: palette gradient, labels every `st` dBZ
- for(let d=lo;d<=hi;d+=2){const q=Math.round((d+30)/125*511)*4;g.push(`rgba(${PAL[q]},${PAL[q+1]},${PAL[q+2]},${PAL[q+3]/255}) ${(d-lo)/(hi-lo)*100}%`)}
- let lab='';for(let d=lo;d<=hi;d+=st)lab+=`<span style="bottom:${(d-lo)/(hi-lo)*100}%">${d}</span>`;
- $('lb').innerHTML=`<div class="bar" style="background:linear-gradient(to top,${g.join(',')})"></div><div class="lab">${lab}</div>`}
+buildLegend();prodBtns();
+$('palbtn').onclick=()=>$('palfile').click();
+$('palfile').onchange=async e=>{
+ for(const f of e.target.files){try{
+  const p=buildPal(await f.text());let k=p.product?(ALIAS[p.product]||p.product):curCode;
+  if(!PRODS[k]){say(`${f.name}: product "${p.product}" isn't supported`);continue}
+  PALS[k]=p;try{localStorage.setItem('ar1pal:'+k,await f.text())}catch(_){}
+  if(k==curCode){if(gl)setPalTex();buildLegend();drawPPI()}say(`${k} color table loaded: ${f.name}`)
+ }catch(err){say(`${f.name}: ${err.message}`)}}
+ e.target.value='';
+};
+$('palreset').onclick=()=>{PALS[curCode]=buildPal(DEF[curCode]);try{localStorage.removeItem('ar1pal:'+curCode)}catch(_){}
+ if(gl)setPalTex();buildLegend();drawPPI();say(curCode+' color table reset')};
+$('sdir').oninput=$('sspd').oninput=drawPPI;
 $('op').oninput=()=>{$('opo').textContent=$('op').value+'%'};
 $('smooth').onchange=()=>{if(gl)setFilter()};$('weak').onchange=drawPPI;
 $('fov').oninput=$('yaw').oninput=()=>{$('fovo').textContent=$('fov').value+'°';$('yawo').textContent=$('yaw').value+'°'};
