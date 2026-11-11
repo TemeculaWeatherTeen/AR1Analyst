@@ -21,7 +21,7 @@ select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28p
 #info{left:8px}#info2{right:8px;text-align:right}
 #leg{left:8px;top:50%;transform:translateY(-50%);padding:6px;font-size:11px}
 #leg .h{text-align:center;font-weight:600;margin-bottom:3px}
-#leg .q{display:flex;align-items:center;gap:6px;height:20px}#leg b{width:14px;height:100%;display:block;border-radius:2px}
+#lb{display:flex;gap:6px;height:min(300px,46vh)}#lb .bar{width:14px;border-radius:3px;border:.5px solid var(--sep)}#lb .lab{position:relative;width:22px}#lb .lab span{position:absolute;left:0;transform:translateY(50%);font-size:9px;line-height:1}
 #prod{left:8px;bottom:calc(var(--sb) + 48px);padding:5px 12px;font-weight:600}
 #st{left:8px;right:8px;bottom:var(--sb);padding:11px 14px;font-size:12px;white-space:nowrap;overflow-x:auto;scrollbar-width:none}
 #ppi{position:fixed;right:8px;bottom:calc(var(--sb) + 48px);width:150px;height:150px;border-radius:50%;background:rgba(0,0,0,.45);border:.5px solid var(--sep);z-index:3}
@@ -30,7 +30,7 @@ select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28p
 #sheet .row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:.5px solid var(--sep)}
 #sheet .row:first-child{border-top:0}#sheet .row span{flex:1}#sheet .row button{flex:1}
 #sheet input{flex:2;accent-color:var(--blue)}#sheet output{width:44px;text-align:right;color:#aaa}
-@media(max-height:520px){#leg .q{height:13px}}
+#sheet input.sw{-webkit-appearance:none;appearance:none;flex:none;width:51px;height:31px;border-radius:16px;background:#39393d;position:relative;transition:.2s}#sheet input.sw::after{content:'';position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;transition:.2s}#sheet input.sw:checked{background:#34C759}#sheet input.sw:checked::after{left:22px}
 </style></head><body>
 <video id="cam" playsinline muted autoplay></video>
 <canvas id="ar"></canvas><canvas id="hud"></canvas>
@@ -49,6 +49,9 @@ select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28p
 <div id="sheet" class="glass" hidden>
  <div class="row"><span>Field of view</span><input id="fov" type="range" min="30" max="90" value="63"><output id="fovo">63°</output></div>
  <div class="row"><span>Yaw trim</span><input id="yaw" type="range" min="-180" max="180" value="0"><output id="yawo">0°</output></div>
+ <div class="row"><span>Smoothing</span><input id="smooth" class="sw" type="checkbox" checked></div>
+ <div class="row"><span>Clear-air echoes</span><input id="weak" class="sw" type="checkbox"></div>
+ <div class="row"><span>Opacity</span><input id="op" type="range" min="20" max="100" value="75"><output id="opo">75%</output></div>
  <div class="row"><button id="cal">🧭 Calibrate heading</button></div>
  <div class="row"><button id="loc">📍 Set location</button></div>
 </div>
@@ -110,7 +113,7 @@ function bunzip(src){
 
 // ---- NEXRAD Level 2 reflectivity (msg 31, REF) -> polar cells [az,range km,elev,dBZ,azWidth,gateKm]
 function parseL2(buf){
- let vcp=null;const u8=new Uint8Array(buf),dv=new DataView(buf),by={},seen={},ec={};let p=24;
+ let vcp=null;const u8=new Uint8Array(buf),dv=new DataView(buf),cuts={},seen={};let p=24;
  while(p+4<=u8.length){
   const sz=Math.abs(dv.getInt32(p));p+=4;if(!sz)break;
   let d;try{d=bunzip(u8.subarray(p,p+sz))}catch(e){break}p+=sz;
@@ -123,70 +126,112 @@ function parseL2(buf){
     if(seen[k]===en)for(let i=0;i<Math.min(nb,9);i++){
      const b=m+v.getUint32(m+32+4*i);if(d[b+1]==86&&d[b+2]==79&&d[b+3]==76)vcp=v.getUint16(b+40);
      if(d[b]==68&&d[b+1]==82&&d[b+2]==69&&d[b+3]==70&&d[b+19]==8){
-      const e1=ec[en]||(ec[en]={s:0,n:0});e1.s+=el;e1.n++;
-      const ng=v.getUint16(b+8),f0=v.getUint16(b+10),gs=v.getUint16(b+12)/1000,sc=v.getFloat32(b+20),of=v.getFloat32(b+24);
-      for(let g=0;g<ng;g++){
-       const raw=d[b+28+g];if(raw<2)continue;const dbz=(raw-of)/sc;if(dbz<10)continue;
-       (by[en]||(by[en]=[])).push(az,f0/1000+g*gs,0,dbz,aw,gs);
-      }
+      const ng=v.getUint16(b+8);let c=cuts[en];
+      if(!c){const N=Math.round(360/aw);c=cuts[en]={es:0,cnt:0,N,aw,ng,r0:v.getUint16(b+10)/1000,gs:v.getUint16(b+12)/1000,sc:v.getFloat32(b+20),off:v.getFloat32(b+24),data:new Uint8Array(N*ng*2)}}
+      c.es+=el;c.cnt++;
+      const idx=Math.round(az/c.aw)%c.N,n=Math.min(ng,c.ng);
+      for(let g=0;g<n;g++){const raw=d[b+28+g];if(raw>=2){const q=(g*c.N+idx)*2;c.data[q]=raw;c.data[q+1]=255}}   // R=raw, G=valid
      }
     }
     o+=12+size*2;
    }else o+=2432;
   }
  }
- const ens=Object.keys(ec).sort((a,b)=>ec[a].s/ec[a].n-ec[b].s/ec[b].n),out=[],tilts=[];
- for(const en of ens){const el=ec[en].s/ec[en].n,a=by[en]||[],start=out.length/6;
-  for(let q=0;q<a.length;q++)out.push(q%6==2?el:a[q]);tilts.push({el,start,n:a.length/6})}   // one exact elevation per cut -> clean cone
- return {cells:new Float32Array(out),tilts,vcp:vcp>0&&vcp<1000?vcp:null};
+ const tilts=Object.values(cuts).map(c=>(c.el=c.es/c.cnt,c)).sort((a,b)=>a.el-b.el);
+ return {tilts,vcp:vcp>0&&vcp<1000?vcp:null};
 }
 
-const COL=['#04e9e7','#019ff4','#0300f4','#02fd02','#01c501','#008e00','#fdf802','#fd9500','#fd0000','#bc0000','#f800fd','#ffffff'];
-const bin=d=>Math.max(0,Math.min(11,Math.floor((d-15)/5)));
+// ---- color table (GR palette format): "color: v r g b [r2 g2 b2]" = gradient to next stop; color4 adds alpha
+const PALTXT=`color4: -30 116 78 173 0 147 141 117 255
+color: -20 150 145 83 210 212 180
+color: -10 204 207 180 65 91 158
+color: 10 67 97 162 106 208 228
+color: 18 111 214 232 53 213 91
+color: 22 17 213 24 9 94 9
+color: 35 29 104 9 234 210 4
+color: 40 255 226 0 255 128 0
+color: 50 255 0 0 113 0 0
+color: 60 255 255 255 255 146 255
+color: 65 255 117 255 225 11 227
+color: 70 178 0 255 99 0 214
+color: 75 5 236 240 1 32 32
+color: 85 1 32 32
+color: 95 1 32 32`;
+const PAL=(()=>{const S=[];
+ for(const L of PALTXT.split('\n')){const [k,rest]=L.split(':'),n=rest.trim().split(/\s+/).map(Number),a4=k.trim()=='color4',w=a4?4:3;
+  const f=c=>c?[c[0],c[1],c[2],a4?c[3]:255]:null;S.push({v:n[0],c1:f(n.slice(1,1+w)),c2:n.length>=1+2*w?f(n.slice(1+w,1+2*w)):null})}
+ const out=new Uint8Array(512*4);                      // 512 samples over -30..95 dBZ
+ for(let i=0;i<512;i++){const x=-30+125*i/511;let s=0;while(s<S.length-1&&S[s+1].v<=x)s++;
+  const a=S[s],b=S[s+1];let c=a.c1;if(a.c2&&b){const t=(x-a.v)/(b.v-a.v);c=a.c1.map((q,z)=>q+(a.c2[z]-q)*t)}
+  out.set(c.map(Math.round),i*4)}
+ return out})();
 const $st=$('st'),ppiImg=document.createElement('canvas');ppiImg.width=ppiImg.height=300;
 let user=null,gps='GPS: tap Start AR',sensors=false,abs=false,corr=0,chosen=false,scanKey='',nCells=0,yaw=0,pitch=0;
 let basis={r:[1,0,0],u:[0,0,1],f:[0,1,0]};
 
-// ---- WebGL2: every gate is an instanced polar quad (annular sector), projected in the vertex shader
+// ---- WebGL2: each tilt = inverted cone mesh; the fragment shader samples the polar data texture
+//      (LINEAR filtering = smoothing, NEAREST = raw range bins) and maps dBZ through the palette
 const cv=$('ar'),hud=$('hud'),hx=hud.getContext('2d'),pc=$('ppi').getContext('2d');
 const gl=cv.getContext('webgl2',{premultipliedAlpha:true,alpha:true});
-let prog,vao,ibuf,loc={};
+let prog,vao,nIdx=0,palTex,loc={};
 if(gl){
  const sh=(t,s)=>{const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);if(!gl.getShaderParameter(o,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(o));return o};
  prog=gl.createProgram();
  gl.attachShader(prog,sh(gl.VERTEX_SHADER,`#version 300 es
-layout(location=0) in vec2 c; layout(location=1) in vec4 A; layout(location=2) in vec2 Bw;
-uniform vec2 U,S; uniform vec3 R,Up,Fw; uniform float T; out float dbz;
+layout(location=0) in vec2 P; uniform vec2 U,S; uniform vec3 R,Up,Fw; uniform float E; out vec2 vP;
 void main(){
- if(T>=0.&&abs(A.z-T)>.06){gl_Position=vec4(2.,2.,2.,1.);return;}
- float az=radians(A.x+(c.x-.5)*Bw.x), r=A.y+(c.y-.5)*Bw.y, el=radians(A.z);
+ float az=radians(P.x), r=P.y, el=radians(E);
  float s=r*cos(el), h=r*sin(el)+r*r/16990.;
  vec3 p=vec3(s*sin(az)+U.x, s*cos(az)+U.y, 0.);
  p.z=h-dot(p.xy,p.xy)/12742.;
  gl_Position=vec4(dot(p,R)*S.x, dot(p,Up)*S.y, 0., dot(p,Fw));
- dbz=A.w;}`));
+ vP=P;}`));
  gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,`#version 300 es
-precision mediump float; in float dbz; uniform vec3 K[12]; out vec4 o;
-void main(){int i=int(clamp(floor((dbz-15.)/5.),0.,11.));o=vec4(K[i]*.62,.62);}`));
+precision highp float; in vec2 vP; uniform sampler2D D,Pal; uniform vec4 G,Q; uniform float Mn,Op; out vec4 o;
+void main(){
+ float j=(vP.y-G.x)/G.y; if(j<-.5||j>G.z-.5)discard;
+ float N=360./Q.x;
+ vec2 t=texture(D,vec2((vP.x/Q.x+.5)/N,(j+.5)/G.z)).rg;
+ if(t.g<.02)discard;
+ float dbz=(t.r/t.g*255.-Q.z)/Q.y; if(dbz<Mn)discard;
+ vec4 c=texture(Pal,vec2(clamp((dbz+30.)/125.,0.,1.),.5));
+ float a=c.a*Op*smoothstep(0.,.7,t.g);
+ o=vec4(c.rgb*a,a);}`));
  gl.linkProgram(prog);
- for(const n of['U','S','R','Up','Fw','K','T'])loc[n]=gl.getUniformLocation(prog,n);
- vao=gl.createVertexArray();gl.bindVertexArray(vao);
- const cb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,cb);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([0,0,1,0,0,1,1,1]),gl.STATIC_DRAW);
- gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
- ibuf=gl.createBuffer();
- gl.useProgram(prog);
- gl.uniform3fv(loc.K,new Float32Array(COL.flatMap(h=>[1,3,5].map(i=>parseInt(h.substr(i,2),16)/255))));
- gl.enable(gl.BLEND);gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
+ for(const n of['U','S','R','Up','Fw','E','G','Q','Mn','Op','D','Pal'])loc[n]=gl.getUniformLocation(prog,n);
+ const NA=361,NR=93,V=new Float32Array(NA*NR*2),I=new Uint16Array((NA-1)*(NR-1)*6);let k=0;   // az 0..360 x range 0..460 km
+ for(let j=0;j<NR;j++)for(let i=0;i<NA;i++){V[k++]=i;V[k++]=j*5}
+ k=0;for(let j=0;j<NR-1;j++)for(let i=0;i<NA-1;i++){const a=j*NA+i,b=a+1,c=a+NA,d=c+1;I.set([a,b,c,b,d,c],k);k+=6}
+ nIdx=I.length;vao=gl.createVertexArray();gl.bindVertexArray(vao);
+ gl.bindBuffer(gl.ARRAY_BUFFER,gl.createBuffer());gl.bufferData(gl.ARRAY_BUFFER,V,gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+ gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,gl.createBuffer());gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,I,gl.STATIC_DRAW);
+ palTex=gl.createTexture();gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,palTex);
+ gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,512,1,0,gl.RGBA,gl.UNSIGNED_BYTE,PAL);
+ for(const [a,b] of[[gl.TEXTURE_MIN_FILTER,gl.LINEAR],[gl.TEXTURE_MAG_FILTER,gl.LINEAR],[gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE],[gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE]])gl.texParameteri(gl.TEXTURE_2D,a,b);
+ gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
 }
-function upload(cells){
- gl.bindVertexArray(vao);gl.bindBuffer(gl.ARRAY_BUFFER,ibuf);gl.bufferData(gl.ARRAY_BUFFER,cells,gl.STATIC_DRAW);
- gl.enableVertexAttribArray(1);gl.vertexAttribPointer(1,4,gl.FLOAT,false,24,0);gl.vertexAttribDivisor(1,1);
- gl.enableVertexAttribArray(2);gl.vertexAttribPointer(2,2,gl.FLOAT,false,24,16);gl.vertexAttribDivisor(2,1);
- nCells=cells.length/6;
+function setFilter(){const f=$('smooth').checked?gl.LINEAR:gl.NEAREST;gl.activeTexture(gl.TEXTURE0);
+ for(const c of tiltList){gl.bindTexture(gl.TEXTURE_2D,c.tex);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,f);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,f)}}
+function uploadCuts(t){
+ gl.activeTexture(gl.TEXTURE0);gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);
+ for(const o of tiltList)if(o.tex)gl.deleteTexture(o.tex);
+ for(const c of t){c.tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,c.tex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RG8,c.N,c.ng,0,gl.RG,gl.UNSIGNED_BYTE,c.data);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE)}
+ tiltList=t;setFilter();
 }
-
-let allCells=new Float32Array(0),tiltList=[],vcp=null,vt=null,nextAt=Date.now()+3e5;
-function curRange(){const T=+$('tilt').value,t=tiltList.find(e=>Math.abs(e.el-T)<.06);return T>=0&&t?t:{start:0,n:allCells.length/6}}
+function drawCones(dE,dN,W,H,F,r,up,f){
+ gl.viewport(0,0,cv.width,cv.height);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
+ gl.useProgram(prog);gl.bindVertexArray(vao);
+ gl.uniform2f(loc.U,dE,dN);gl.uniform2f(loc.S,2*F/W,2*F/H);gl.uniform3fv(loc.R,r);gl.uniform3fv(loc.Up,up);gl.uniform3fv(loc.Fw,f);
+ gl.uniform1f(loc.Mn,$('weak').checked?-30:5);gl.uniform1f(loc.Op,$('op').value/100);gl.uniform1i(loc.D,0);gl.uniform1i(loc.Pal,1);
+ gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,palTex);gl.activeTexture(gl.TEXTURE0);
+ const T=+$('tilt').value;
+ for(const c of tiltList){if(T>=0&&Math.abs(c.el-T)>.06)continue;
+  gl.bindTexture(gl.TEXTURE_2D,c.tex);gl.uniform1f(loc.E,c.el);gl.uniform4f(loc.G,c.r0,c.gs,c.ng,0);gl.uniform4f(loc.Q,c.aw,c.sc,c.off,0);
+  gl.drawElements(gl.TRIANGLES,nIdx,gl.UNSIGNED_SHORT,0)}
+}
+let tiltList=[],vcp=null,vt=null,nextAt=Date.now()+3e5;
 function fillTilts(t){
  const sel=$('tilt'),old=+sel.value,had=sel.dataset.set;tiltList=t;
  sel.innerHTML='<option value="-1">All tilts</option>'+t.map(e=>`<option value="${e.el}">${e.el.toFixed(1)}°</option>`).join('');
@@ -199,13 +244,16 @@ function info(){const s=$('stn').value,n=Math.max(0,Math.round((nextAt-Date.now(
  $('iStn').textContent=s+' '+ST[s].name;$('iVcp').textContent=vcp??'—';
  $('iVT').textContent=vt?'VT: '+new Date(vt).toISOString().substr(11,8)+'Z':'VT: —';
  $('iNext').textContent='Next update: '+String(n/60|0).padStart(2,'0')+':'+String(n%60).padStart(2,'0')}
-function drawPPI(){   // polar minimap of the selected tilt (lowest tilt when "All")
- const T=+$('tilt').value,rg=T<0&&tiltList.length?tiltList[0]:curRange(),c=ppiImg.getContext('2d'),sc=150/230,rd=Math.PI/180,P=COL.map(()=>new Path2D()),A=allCells;
- for(let i=rg.start*6;i<(rg.start+rg.n)*6;i+=6){
-  const az=A[i],r=A[i+1],aw=A[i+4]/2,g=A[i+5]/2,a0=(az-aw)*rd,a1=(az+aw)*rd,r0=(r-g)*sc,r1=(r+g)*sc,q=P[bin(A[i+3])];
-  q.moveTo(150+r0*Math.sin(a0),150-r0*Math.cos(a0));q.lineTo(150+r1*Math.sin(a0),150-r1*Math.cos(a0));
-  q.lineTo(150+r1*Math.sin(a1),150-r1*Math.cos(a1));q.lineTo(150+r0*Math.sin(a1),150-r0*Math.cos(a1));q.closePath()}
- c.clearRect(0,0,300,300);P.forEach((q,b)=>{c.fillStyle=COL[b];c.fill(q)});
+function drawPPI(){   // polar minimap of the selected tilt (lowest when "All"), colored by the palette
+ const c=ppiImg.getContext('2d'),im=c.createImageData(300,300),T=+$('tilt').value,t=T<0?tiltList[0]:tiltList.find(e=>Math.abs(e.el-T)<.06),mn=$('weak').checked?-30:5;
+ if(t)for(let y=0;y<300;y++)for(let x=0;x<300;x++){
+  const dx=x-150,dy=150-y,rr=Math.hypot(dx,dy)*230/150;if(rr>230)continue;
+  const j=Math.round((rr-t.r0)/t.gs);if(j<0||j>=t.ng)continue;
+  const i=Math.round(((Math.atan2(dx,dy)*180/Math.PI+360)%360)/t.aw)%t.N,q=(j*t.N+i)*2;if(!t.data[q+1])continue;
+  const dbz=(t.data[q]-t.off)/t.sc;if(dbz<mn)continue;
+  const pi=Math.max(0,Math.min(511,Math.round((dbz+30)/125*511)))*4,o=(y*300+x)*4;
+  im.data[o]=PAL[pi];im.data[o+1]=PAL[pi+1];im.data[o+2]=PAL[pi+2];im.data[o+3]=PAL[pi+3]}
+ c.putImageData(im,0,0);
 }
 async function load(){
  nextAt=Date.now()+3e5;const id=$('stn').value;$st.textContent='Loading '+id+'…';
@@ -222,8 +270,8 @@ async function load(){
   let buf=await(await fetch(B+key)).arrayBuffer();
   const a=new Uint8Array(buf);
   if(a[0]==0x1f&&a[1]==0x8b)buf=await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-  const {cells,tilts,vcp:vc}=parseL2(buf);vcp=vc;
-  if(gl)upload(cells);allCells=cells;fillTilts(tilts);drawPPI();
+  const {tilts,vcp:vc}=parseL2(buf);vcp=vc;
+  if(gl)uploadCuts(tilts);fillTilts(tilts);drawPPI();
   scanKey=key.split('/').pop();const mm=scanKey.match(/(\d{4})(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)/);vt=mm?Date.UTC(+mm[1],mm[2]-1,+mm[3],+mm[4],+mm[5],+mm[6]):null;info();
  }catch(e){scanKey='';$st.textContent='Error: '+e.message}
 }
@@ -297,13 +345,7 @@ function frame(){
  const F=Math.max(W,H)/(2*Math.tan($('fov').value*Math.PI/360));
  const ya=(corr+manual+ +$('yaw').value)*Math.PI/180,cy=Math.cos(ya),sy=Math.sin(ya),rot=v=>[v[0]*cy+v[1]*sy,-v[0]*sy+v[1]*cy,v[2]];
  const r=rot(basis.r),up=rot(basis.u),f=rot(basis.f);
- if(gl&&nCells){
-  gl.viewport(0,0,cv.width,cv.height);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.useProgram(prog);gl.bindVertexArray(vao);
-  gl.uniform1f(loc.T,-1);gl.uniform2f(loc.U,dE,dN);gl.uniform2f(loc.S,2*F/W,2*F/H);gl.uniform3fv(loc.R,r);gl.uniform3fv(loc.Up,up);gl.uniform3fv(loc.Fw,f);
-  const rg=curRange();gl.bindBuffer(gl.ARRAY_BUFFER,ibuf);gl.vertexAttribPointer(1,4,gl.FLOAT,false,24,rg.start*24);gl.vertexAttribPointer(2,2,gl.FLOAT,false,24,rg.start*24+16);
-  gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,rg.n);
- }
+ if(gl&&tiltList.length)drawCones(dE,dN,W,H,F,r,up,f);
  // HUD: cardinals + station marker
  hx.setTransform(dpr,0,0,dpr,0,0);hx.clearRect(0,0,W,H);hx.font='bold 16px system-ui';hx.textAlign='center';hx.fillStyle='#fff';hx.strokeStyle='#000';hx.lineWidth=3;
  const pr=v=>{const d=dot(v,f);return d>.001?[W/2+F*dot(v,r)/d,H/2-F*dot(v,up)/d]:null};
@@ -329,7 +371,12 @@ function frame(){
  pc.fillStyle='#fff';pc.font='14px sans-serif';pc.textAlign='left';pc.fillText('N',143,14);
  requestAnimationFrame(frame);
 }
-$('lb').innerHTML=COL.map((c,b)=>`<div class="q"><b style="background:${c}"></b><span>${15+5*b}</span></div>`).reverse().join('');
+{const lo=-30,hi=80,st=5,g=[];   // legend: palette gradient, labels every `st` dBZ
+ for(let d=lo;d<=hi;d+=2){const q=Math.round((d+30)/125*511)*4;g.push(`rgba(${PAL[q]},${PAL[q+1]},${PAL[q+2]},${PAL[q+3]/255}) ${(d-lo)/(hi-lo)*100}%`)}
+ let lab='';for(let d=lo;d<=hi;d+=st)lab+=`<span style="bottom:${(d-lo)/(hi-lo)*100}%">${d}</span>`;
+ $('lb').innerHTML=`<div class="bar" style="background:linear-gradient(to top,${g.join(',')})"></div><div class="lab">${lab}</div>`}
+$('op').oninput=()=>{$('opo').textContent=$('op').value+'%'};
+$('smooth').onchange=()=>{if(gl)setFilter()};$('weak').onchange=drawPPI;
 $('fov').oninput=$('yaw').oninput=()=>{$('fovo').textContent=$('fov').value+'°';$('yawo').textContent=$('yaw').value+'°'};
 $('gear').onclick=()=>{$('sheet').hidden=!$('sheet').hidden};
 addEventListener('click',e=>{if(!e.target.closest('#sheet,#gear'))$('sheet').hidden=true});
