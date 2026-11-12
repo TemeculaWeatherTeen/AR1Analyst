@@ -30,13 +30,14 @@ select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28p
 #sheet .row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:.5px solid var(--sep)}
 #sheet .row:first-child{border-top:0}#sheet .row span{flex:1}#sheet .row button{flex:1}
 #sheet input{flex:2;accent-color:var(--blue)}#sheet output{width:44px;text-align:right;color:#aaa}
+#histbtn.on{background:var(--blue)}#hist{left:50%;transform:translateX(-50%);width:min(420px,calc(100% - 16px));bottom:calc(var(--sb) + 48px);z-index:5}#hist .row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:.5px solid var(--sep)}#hist .row:first-child{border-top:0}#hist .row span{flex:1;font-variant-numeric:tabular-nums}#hist .row button{flex:1}#hist .row button#hprev,#hist .row button#hnext{flex:none;width:44px}#hist input[type=range]{flex:3;accent-color:var(--blue)}#hist input[type=date]{background:var(--fill);color:#fff;border:0;border-radius:8px;padding:6px;font:inherit}
 #dlg{left:50%;transform:translateX(-50%);width:min(340px,calc(100% - 24px));bottom:calc(var(--sb) + 60px);z-index:8;padding:14px}#dlg #dmsg{margin-bottom:10px;line-height:1.35}#dlg input{width:100%;background:var(--fill);color:#fff;border:0;border-radius:10px;padding:10px;font:inherit;margin-bottom:10px;-webkit-user-select:text;user-select:text}#dlg .btns{display:flex;gap:8px}#dlg .btns button{flex:1}#dok{background:var(--blue)}
 #sheet input[type=number]{flex:none;width:64px;background:var(--fill);color:#fff;border:0;border-radius:8px;padding:6px;font:inherit;text-align:right}#sheet input.sw{-webkit-appearance:none;appearance:none;flex:none;width:51px;height:31px;border-radius:16px;background:#39393d;position:relative;transition:.2s}#sheet input.sw::after{content:'';position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;transition:.2s}#sheet input.sw:checked{background:#34C759}#sheet input.sw:checked::after{left:22px}
 </style></head><body>
 <video id="cam" playsinline muted autoplay></video>
 <canvas id="ar"></canvas><canvas id="hud"></canvas>
 <div id="top" class="glass">
- <div class="r"><select id="stn" aria-label="Radar station"></select><div id="ttl">AR1Analyst</div><button id="volbtn">▣ Vol</button><button id="gear" aria-label="Settings">⚙︎</button></div>
+ <div class="r"><select id="stn" aria-label="Radar station"></select><div id="ttl">AR1Analyst</div><button id="histbtn" title="Historical radar">🕘</button><button id="volbtn">▣ Vol</button><button id="gear" aria-label="Settings">⚙︎</button></div>
  <div id="prods"><span id="pbtn"></span><i></i><span id="chips"></span></div>
  <select id="tilt" hidden><option value="-1">All tilts</option></select>
 </div>
@@ -46,6 +47,12 @@ select{-webkit-appearance:none;appearance:none;font-weight:600;padding-right:28p
 <div id="prod" class="glass">BR</div>
 <div id="st" class="glass">Pick a station, then tap Start AR.</div>
 <canvas id="ppi" width="300" height="300"></canvas>
+<div id="hist" class="glass" hidden>
+ <div class="row"><span>Date (UTC)</span><input id="hdate" type="date"></div>
+ <div class="row"><span id="hlab">Pick a date</span></div>
+ <div class="row"><button id="hprev">◀︎</button><input id="hsl" type="range" min="0" max="0" value="0"><button id="hnext">▶︎</button></div>
+ <div class="row"><button id="hlive">Back to live</button><button id="hload">Load scan</button></div>
+</div>
 <div id="dlg" class="glass" hidden><div id="dmsg"></div><input id="dinp" inputmode="decimal" autocomplete="off"><div class="btns"><button id="dno">Cancel</button><button id="dalt" hidden></button><button id="dok">OK</button></div></div>
 <button id="go">Start AR</button>
 <div id="sheet" class="glass" hidden>
@@ -423,8 +430,8 @@ function chips(){const sel=$('tilt'),box=$('chips');box.innerHTML='';
  const T=+sel.value;$('prod').textContent=curCode+' '+(T<0?'all tilts':T.toFixed(3)+'°')}
 function info(){const s=$('stn').value,n=Math.max(0,Math.round((nextAt-Date.now())/1e3));
  $('iStn').textContent=s+' '+ST[s].name;$('iVcp').textContent=vcp??'—';
- $('iVT').textContent=vt?'VT: '+new Date(vt).toISOString().substr(11,8)+'Z':'VT: —';
- $('iNext').textContent='Next update: '+String(n/60|0).padStart(2,'0')+':'+String(n%60).padStart(2,'0')}
+ $('iVT').textContent=vt?'VT: '+(histKey?fmtT(vt):new Date(vt).toISOString().substr(11,8)+'Z'):'VT: —';
+ $('iNext').textContent=histKey?'HISTORICAL · live paused':'Next update: '+String(n/60|0).padStart(2,'0')+':'+String(n%60).padStart(2,'0')}
 function drawPPI(){   // polar minimap of the selected product/tilt (lowest tilt when "All"), colored by the palette
  const c=ppiImg.getContext('2d'),im=c.createImageData(300,300),T=+$('tilt').value,t=T<0?tiltList[0]:tiltList.find(e=>Math.abs(e.el-T)<.06),pl=PALS[curCode],mn=minV(),sr=srv();
  ppiR=t?Math.min(460,t.r0+t.ng*t.gs):230;
@@ -449,22 +456,38 @@ function prodBtns(){const box=$('pbtn');box.innerHTML='';
 function setProduct(k){curCode=k;tiltList=P[PRODS[k]]||[];if(gl){ensureTex();setPalTex()}
  fillTilts(tiltList);buildLegend();prodBtns();drawPPI();
  if(k=='SRV'&&!(+$('sspd').value))say('SRV: set the storm motion in ⚙︎ settings')}
+const pad2=x=>String(x).padStart(2,'0');
+const keyTime=k=>{const m=k.match(/(\d{4})(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)/);return m?Date.UTC(+m[1],m[2]-1,+m[3],+m[4],+m[5],+m[6]):0};
+const fmtT=ms=>new Date(ms).toISOString().replace('T',' ').substr(0,19)+'Z';
+async function listKeys(id,y,mo,d){   // every scan for one UTC day at one station (paged)
+ const pre=`${y}/${pad2(mo)}/${pad2(d)}/${id}/`,keys=[];let tok='';
+ for(let n=0;n<4;n++){
+  const x=await(await fetch(B+'?list-type=2&prefix='+pre+(tok?'&continuation-token='+encodeURIComponent(tok):''))).text();
+  keys.push(...[...x.matchAll(/<Key>([^<]+)<\/Key>/g)].map(m=>m[1]));
+  const m=x.match(/<NextContinuationToken>([^<]+)</);if(!m)break;tok=m[1]}
+ return keys.filter(k=>!/_MDM$/.test(k)&&/\d{8}_\d{6}/.test(k)).sort();
+}
+async function latestKey(id){for(let k=0;k<2;k++){const d=new Date(Date.now()-k*864e5),ks=await listKeys(id,d.getUTCFullYear(),d.getUTCMonth()+1,d.getUTCDate());if(ks.length)return ks[ks.length-1]}}
+// ---- historical mode: pick any archived volume (histKey != null pauses live updates)
+let histKey=null,hKeys=[];
+const hLabel=()=>{$('hlab').textContent=hKeys.length?`${+$('hsl').value+1}/${hKeys.length}  ·  ${fmtT(keyTime(hKeys[+$('hsl').value]))}`:'No scans for this station/date'};
+async function histList(){
+ const v=$('hdate').value;if(!v)return;const [y,m,d]=v.split('-').map(Number);$('hlab').textContent='Listing scans…';
+ try{hKeys=await listKeys($('stn').value,y,m,d)}catch(e){hKeys=[]}
+ const sl=$('hsl');sl.max=Math.max(0,hKeys.length-1);let best=0,bd=1e18;
+ if(vt)hKeys.forEach((k,i)=>{const dd=Math.abs(keyTime(k)-vt);if(dd<bd){bd=dd;best=i}});   // start nearest the scan currently shown
+ sl.value=best;hLabel();
+}
+function histLoad(){const k=hKeys[+$('hsl').value];if(!k)return;histKey=k;$('histbtn').classList.add('on');load()}
 async function load(){
  nextAt=Date.now()+3e5;const id=$('stn').value;$st.textContent='Loading '+id+'…';
  try{
-  let key;
-  for(let k=0;k<2&&!key;k++){
-   const d=new Date(Date.now()-k*864e5),pad=x=>String(x).padStart(2,'0');
-   const pre=`${d.getUTCFullYear()}/${pad(d.getUTCMonth()+1)}/${pad(d.getUTCDate())}/${id}/`;
-   const x=await(await fetch(B+'?list-type=2&prefix='+pre)).text();
-   const ks=[...x.matchAll(/<Key>([^<]+)<\/Key>/g)].map(m=>m[1]).filter(k=>!k.endsWith('_MDM'));
-   key=ks[ks.length-1];
-  }
+  const key=histKey||await latestKey(id);
   if(!key)throw new Error('no recent scans');
   let buf=await(await fetch(B+key)).arrayBuffer();
   const a=new Uint8Array(buf);
   if(a[0]==0x1f&&a[1]==0x8b)buf=await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-  const {prods,vcp:vc}=parseL2(buf);vcp=vc;
+  const {prods,vcp:vc}=parseL2(buf);if(!Object.keys(prods).length)throw new Error('No supported radar data in this scan (files before ~2008 use a legacy format)');vcp=vc;
   if(gl){freeTex();freeVols()}P=prods;setProduct(P[PRODS[curCode]]&&P[PRODS[curCode]].length?curCode:'BR');
   scanKey=key.split('/').pop();const mm=scanKey.match(/(\d{4})(\d\d)(\d\d)_(\d\d)(\d\d)(\d\d)/);vt=mm?Date.UTC(+mm[1],mm[2]-1,+mm[3],+mm[4],+mm[5],+mm[6]):null;info();
  }catch(e){scanKey='';$st.textContent='Error: '+e.message}
@@ -535,7 +558,8 @@ $('loc').onclick=async()=>{
  if(r.v){const [a,o]=r.v.split(',').map(Number);if(isFinite(a)&&isFinite(o)){user={lat:a,lon:o};gps='manual location';autoDecl();say('Location set manually')}else say('Could not read that as lat,lon');return}
  startGeo();
 };
-$('tilt').onchange=drawPPI;$('stn').onchange=()=>{chosen=true;load();autoDecl()};load();setInterval(()=>{if(Date.now()>=nextAt)load();info()},1000);
+$('tilt').onchange=drawPPI;$('stn').onchange=()=>{chosen=true;autoDecl();
+ if(histKey)histList().then(()=>{const k=hKeys[+$('hsl').value];histKey=k||null;$('histbtn').classList.toggle('on',!!histKey);if(!k)say('No scans for that station on this date: back to live');load()});else load()};load();setInterval(()=>{if(!histKey&&Date.now()>=nextAt)load();info()},1000);
 
 // ---- render
 function sunPos(dt,lat,lon){
@@ -614,10 +638,18 @@ $('op').oninput=()=>{$('opo').textContent=$('op').value+'%'};
 $('smooth').onchange=()=>{if(gl)setFilter()};$('weak').onchange=drawPPI;
 $('fov').oninput=$('yaw').oninput=()=>{$('fovo').textContent=$('fov').value+'°';$('yawo').textContent=$('yaw').value+'°'};
 $('gear').onclick=()=>{$('sheet').hidden=!$('sheet').hidden};
-addEventListener('click',e=>{if(!e.target.closest('#sheet,#gear,#dlg'))$('sheet').hidden=true});
+addEventListener('click',e=>{if(!e.target.closest('#sheet,#gear,#dlg'))$('sheet').hidden=true;if(!e.target.closest('#hist,#histbtn,#dlg'))$('hist').hidden=true});
 $('volbtn').onclick=()=>{volOn=!volOn;$('volbtn').classList.toggle('on',volOn);document.body.classList.toggle('vol',volOn);
  if(volOn)say('Volume: all tilts ray-marched. If it lags, lower Volume quality in ⚙︎')};
 $('vden').oninput=()=>{$('vdeno').textContent=$('vden').value};
+{const t=new Date().toISOString().slice(0,10);$('hdate').max=t;$('hdate').value=t}
+$('histbtn').onclick=()=>{const o=$('hist').hidden;$('hist').hidden=!o;if(o){if(vt)$('hdate').value=new Date(vt).toISOString().slice(0,10);histList()}};
+$('hdate').onchange=histList;
+$('hsl').oninput=hLabel;
+$('hload').onclick=()=>{histLoad();say('Historical mode: live updates paused')};
+$('hprev').onclick=()=>{$('hsl').value=Math.max(0,+$('hsl').value-1);hLabel();histLoad()};
+$('hnext').onclick=()=>{$('hsl').value=Math.min(+$('hsl').max,+$('hsl').value+1);hLabel();histLoad()};
+$('hlive').onclick=()=>{histKey=null;$('histbtn').classList.remove('on');$('hist').hidden=true;load()};
 info();
 frame();
 </script></body></html>
