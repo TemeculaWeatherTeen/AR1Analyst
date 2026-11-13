@@ -1,175 +1,177 @@
-const recordBtn = $('record');
-let recordIsActive = false;
-let recordRecorder = null;
-let recordChunks = [];
-let captureCanvas = null;
-let captureCtx = null;
-let micStream = null;
+const recordButton = $('record');
+let recordingActive = false;
+let mediaRecorder = null;
+let recordingParts = [];
+let recordingCanvas = null;
+let recordingContext = null;
+let recordingMic = null;
+let recordingStream = null;
+let recordingFrame = 0;
+
+// The recorder has its own canvas so app controls and HUD never enter the export.
+const recordingStyle = document.createElement('style');
+recordingStyle.textContent = `
+#record{position:fixed;right:16px;bottom:calc(var(--sb) + 88px);z-index:12;width:56px;height:56px;border-radius:50%;border:2px solid rgba(255,255,255,.8);background:#d11a1a;color:#fff;font-size:20px;font-weight:700;box-shadow:0 10px 26px #0007}
+#record.recording{background:#7d0f0f;box-shadow:0 0 0 4px #f003,0 10px 30px #f005}
+#record:active{transform:scale(.97)}
+`;
+document.head.append(recordingStyle);
 
 function ensureRecordingCanvas(){
-  if(captureCanvas) return;
-  captureCanvas = document.createElement('canvas');
-  captureCtx = captureCanvas.getContext('2d');
+  if(recordingCanvas) return;
+  recordingCanvas = document.createElement('canvas');
+  recordingContext = recordingCanvas.getContext('2d');
 }
 
-function drawCardinalMarkers(ctx, W, H){
+function drawCardinalMarks(ctx, width, height){
   ctx.save();
-  ctx.font = 'bold 26px system-ui';
+  ctx.font = 'bold 22px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 4;
   ctx.strokeStyle = 'rgba(0,0,0,.9)';
-  ctx.fillStyle = '#ffffff';
-  const pts = [
-    ['N', W / 2, 28],
-    ['E', W - 28, H / 2],
-    ['S', W / 2, H - 28],
-    ['W', 28, H / 2]
+  ctx.fillStyle = '#fff';
+  const marks = [
+    ['N', width / 2, 28],
+    ['E', width - 28, height / 2],
+    ['S', width / 2, height - 28],
+    ['W', 28, height / 2]
   ];
-  for(const [label,x,y] of pts){
-    ctx.strokeText(label, x, y);
-    ctx.fillText(label, x, y);
+  for(const [letter, x, y] of marks){
+    ctx.strokeText(letter, x, y);
+    ctx.fillText(letter, x, y);
   }
   ctx.restore();
 }
 
-function compositeRecordingFrame(){
-  if(!captureCanvas || !captureCtx) return;
-  const W = innerWidth;
-  const H = innerHeight;
+function drawRecordingFrame(){
+  if(!recordingCanvas || !recordingContext) return;
+  const width = window.innerWidth;
+  const height = window.innerHeight;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const cw = Math.max(1, Math.round(W * dpr));
-  const ch = Math.max(1, Math.round(H * dpr));
-  if(captureCanvas.width !== cw || captureCanvas.height !== ch){
-    captureCanvas.width = cw;
-    captureCanvas.height = ch;
+  const pixelWidth = Math.max(1, Math.round(width * dpr));
+  const pixelHeight = Math.max(1, Math.round(height * dpr));
+  if(recordingCanvas.width !== pixelWidth || recordingCanvas.height !== pixelHeight){
+    recordingCanvas.width = pixelWidth;
+    recordingCanvas.height = pixelHeight;
   }
 
-  captureCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  captureCtx.clearRect(0, 0, W, H);
+  recordingContext.setTransform(dpr, 0, 0, dpr, 0, 0);
+  recordingContext.clearRect(0, 0, width, height);
 
-  if($('cam') && $('cam').videoWidth && $('cam').videoHeight){
-    const vw = $('cam').videoWidth;
-    const vh = $('cam').videoHeight;
-    const scale = Math.max(W / vw, H / vh);
-    const dw = vw * scale;
-    const dh = vh * scale;
-    const dx = (W - dw) / 2;
-    const dy = (H - dh) / 2;
-    captureCtx.drawImage($('cam'), dx, dy, dw, dh);
+  const camera = $('cam');
+  if(camera && camera.videoWidth && camera.videoHeight){
+    const scale = Math.max(width / camera.videoWidth, height / camera.videoHeight);
+    const drawWidth = camera.videoWidth * scale;
+    const drawHeight = camera.videoHeight * scale;
+    recordingContext.drawImage(camera, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
   }
 
+  // #ar contains only the transparent radar render; do not capture #hud or interface elements.
   if(cv && cv.width && cv.height){
-    captureCtx.drawImage(cv, 0, 0, W, H);
+    recordingContext.drawImage(cv, 0, 0, width, height);
   }
-
-  drawCardinalMarkers(captureCtx, W, H);
+  drawCardinalMarks(recordingContext, width, height);
 }
 
-async function startMicrophone(){
-  if(micStream) return micStream;
-  try{
-    micStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false
-      }
-    });
-  } catch (e) {
-    micStream = null;
+function stopRecording(){
+  if(!recordingActive) return;
+  recordingActive = false;
+  cancelAnimationFrame(recordingFrame);
+  if(mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  if(recordButton){
+    recordButton.classList.remove('recording');
+    recordButton.textContent = '●';
+    recordButton.setAttribute('aria-label', 'Start recording');
+    recordButton.title = 'Start recording';
   }
-  return micStream;
 }
 
-async function toggleRecording(){
-  if(!recordBtn) return;
-
-  if(recordIsActive){
-    if(recordRecorder && recordRecorder.state !== 'inactive') recordRecorder.stop();
+async function startRecording(){
+  if(recordingActive || !recordButton) return;
+  if(!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream){
+    say('Video recording is not supported by this browser');
+    return;
+  }
+  if(!camStream){
+    say('Camera is not ready yet');
     return;
   }
 
-  if(!camStream){
-    await startCam();
-  }
-  if(!camStream) return;
-
   ensureRecordingCanvas();
-  compositeRecordingFrame();
-
-  const audioStream = await startMicrophone();
-  const canvasStream = captureCanvas.captureStream(30);
+  drawRecordingFrame();
+  const canvasStream = recordingCanvas.captureStream(30);
   const tracks = [...canvasStream.getVideoTracks()];
-  if(audioStream){
-    for(const track of audioStream.getAudioTracks()) tracks.push(track);
+
+  // Audio is recorded from the microphone (not from the muted camera preview).
+  try{
+    recordingMic = await navigator.mediaDevices.getUserMedia({audio:true});
+    tracks.push(...recordingMic.getAudioTracks());
+  }catch(_){
+    say('Microphone unavailable; recording video without audio');
   }
 
-  const combinedStream = new MediaStream(tracks);
-  recordChunks = [];
-  recordRecorder = new MediaRecorder(combinedStream, {
-    mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm'
+  recordingStream = new MediaStream(tracks);
+  const mimeType = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
+    .find(type => MediaRecorder.isTypeSupported(type));
+  try{
+    mediaRecorder = new MediaRecorder(recordingStream, mimeType ? {mimeType} : undefined);
+  }catch(error){
+    recordingStream.getTracks().forEach(track => track.stop());
+    recordingStream = null;
+    if(recordingMic){recordingMic.getTracks().forEach(track => track.stop());recordingMic = null;}
+    say('Could not start recording: ' + error.message);
+    return;
+  }
+
+  recordingParts = [];
+  mediaRecorder.addEventListener('dataavailable', event => {
+    if(event.data && event.data.size) recordingParts.push(event.data);
+  });
+  mediaRecorder.addEventListener('stop', () => {
+    const type = mediaRecorder.mimeType || 'video/webm';
+    if(recordingParts.length){
+      const blob = new Blob(recordingParts, {type});
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `AR1Analyst-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    if(recordingStream) recordingStream.getTracks().forEach(track => track.stop());
+    if(recordingMic){recordingMic.getTracks().forEach(track => track.stop());recordingMic = null;}
+    recordingStream = null;
   });
 
-  recordRecorder.ondataavailable = ev => {
-    if(ev.data && ev.data.size) recordChunks.push(ev.data);
-  };
-
-  recordRecorder.onstop = () => {
-    if(!recordChunks.length) return;
-    const blob = new Blob(recordChunks, { type: recordRecorder.mimeType || 'video/webm' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'AR1Analyst-recording.webm';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
-  };
-
-  recordRecorder.start();
-  recordIsActive = true;
-  recordBtn.classList.add('recording');
-  recordBtn.textContent = '■';
-  recordBtn.title = 'Stop recording';
-
-  const tick = () => {
-    if(!recordIsActive) return;
-    compositeRecordingFrame();
-    requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
-}
-
-if(recordBtn){
-  recordBtn.addEventListener('click', toggleRecording);
-  recordBtn.addEventListener('dblclick', e => e.preventDefault());
-}
-
-const oldStop = () => {
-  if(recordRecorder && recordRecorder.state !== 'inactive'){
-    recordRecorder.stop();
+  try{
+    mediaRecorder.start(1000);
+    recordingActive = true;
+    recordButton.classList.add('recording');
+    recordButton.textContent = '■';
+    recordButton.setAttribute('aria-label', 'Stop recording');
+    recordButton.title = 'Stop recording';
+    const update = () => {
+      if(!recordingActive) return;
+      drawRecordingFrame();
+      recordingFrame = requestAnimationFrame(update);
+    };
+    recordingFrame = requestAnimationFrame(update);
+    say('Recording camera and radar');
+  }catch(error){
+    recordingActive = false;
+    say('Could not start recording: ' + error.message);
   }
-  recordIsActive = false;
-  recordBtn.classList.remove('recording');
-  recordBtn.textContent = '●';
-  recordBtn.title = 'Record';
-};
+}
 
-Object.defineProperty(window, 'stopRecording', {
-  value: oldStop,
-  configurable: true
-});
-
-recordRecorder = null;
-
-if(recordBtn){
-  const orig = recordBtn.onclick;
-  recordBtn.onclick = function(evt){
-    if(orig) orig(evt);
-    if(recordIsActive){
-      oldStop();
-      return;
-    }
-    toggleRecording();
-  };
+if(recordButton){
+  recordButton.hidden = true;
+  recordButton.addEventListener('click', () => {
+    if(recordingActive) stopRecording();
+    else startRecording();
+  });
+  // Reveal only in response to Start AR; script.js handles the actual AR startup.
+  $('go').addEventListener('click', () => { recordButton.hidden = false; });
 }
