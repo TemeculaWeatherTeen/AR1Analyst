@@ -452,8 +452,7 @@ function startGeo(){
  gps='GPS: waiting for permission…';
  navigator.geolocation.watchPosition(p=>{
   const first=!user;user={lat:p.coords.latitude,lon:p.coords.longitude};gps=`GPS ±${p.coords.accuracy|0} m`;autoDecl();
-  if(first&&!chosen){let b=1e9,bi;for(const k in ST){const d=(ST[k].lat-user.lat)**2+((ST[k].lon-user.lon)*Math.cos(user.lat*Math.PI/180))**2;if(d<b){b=d;bi=k}}
-   if(bi!=$('stn').value){$('stn').value=bi;load()}}
+  locChanged();
  },e=>{gps='GPS '+(e.code==1?'denied — enable in Settings › Privacy › Location Services › Safari Websites, or tap 📍':'error: '+e.message)},{enableHighAccuracy:true,maximumAge:10000,timeout:30000});
 }
 let camStream=null;
@@ -469,9 +468,9 @@ document.addEventListener('visibilitychange',ensureCam);addEventListener('focus'
 setInterval(ensureCam,2000);
 // in-app input panel (replaces blocking prompt())
 function ask(msg,o={}){return new Promise(res=>{
- const d=$('dlg'),i=$('dinp');$('sheet').hidden=true;$('dmsg').textContent=msg;i.value=o.def||'';i.placeholder=o.ph||'';
+ const d=$('dlg'),i=$('dinp');$('sheet').hidden=true;$('dmsg').textContent=msg;i.value=o.def||'';i.placeholder=o.ph||'';i.hidden=!!o.noinput;$('dok').textContent=o.ok||'OK';
  $('dalt').hidden=!o.alt;if(o.alt)$('dalt').textContent=o.alt;d.hidden=false;
- const done=v=>{d.hidden=true;$('dok').onclick=$('dno').onclick=$('dalt').onclick=null;ensureCam();res(v)};
+ const done=v=>{d.hidden=true;$('dok').textContent='OK';$('dok').onclick=$('dno').onclick=$('dalt').onclick=null;ensureCam();res(v)};
  $('dok').onclick=()=>done({v:i.value.trim()});$('dno').onclick=()=>done(null);$('dalt').onclick=()=>done({alt:true})})}
 $('go').onclick=()=>{
  startGeo();                                   // no awaits before this
@@ -483,7 +482,7 @@ $('go').onclick=()=>{
 $('loc').onclick=async()=>{
  const r=await ask('Enter latitude,longitude manually, or leave blank to retry GPS.',{ph:'32.88,-117.15'});
  if(!r)return;
- if(r.v){const [a,o]=r.v.split(',').map(Number);if(isFinite(a)&&isFinite(o)){user={lat:a,lon:o};gps='manual location';autoDecl();say('Location set manually')}else say('Could not read that as lat,lon');return}
+ if(r.v){const [a,o]=r.v.split(',').map(Number);if(isFinite(a)&&isFinite(o)){user={lat:a,lon:o};gps='manual location';autoDecl();locChanged(true);say('Location set manually')}else say('Could not read that as lat,lon');return}
  startGeo();
 };
 $('tilt').onchange=drawPPI;$('stn').onchange=()=>{chosen=true;autoDecl();
@@ -529,6 +528,8 @@ function frame(){
  const sp=sunPos(new Date(),u.lat,u.lon);
  if(sp.alt>-2){const ca=Math.cos(sp.alt*Math.PI/180),q2=pr([Math.sin(sp.az*Math.PI/180)*ca,Math.cos(sp.az*Math.PI/180)*ca,Math.sin(sp.alt*Math.PI/180)]);if(q2){hx.fillStyle='#ffd400';hx.beginPath();hx.arc(q2[0],q2[1],16,0,7);hx.fill();hx.stroke();hx.fillStyle='#fff';hx.strokeText('SUN',q2[0],q2[1]+34);hx.fillText('SUN',q2[0],q2[1]+34)}}
  const hd=(curHd=(Math.atan2(f[0],f[1])*180/Math.PI+360)%360),br=(Math.atan2(dE,dN)*180/Math.PI+360)%360;
+ if(northMode){hx.save();hx.strokeStyle='#fff';hx.lineWidth=2;hx.beginPath();hx.moveTo(W/2-34,H/2);hx.lineTo(W/2+34,H/2);hx.moveTo(W/2,H/2-34);hx.lineTo(W/2,H/2+34);hx.stroke();
+  hx.font='bold 20px system-ui';hx.textAlign='center';hx.lineWidth=3;hx.strokeStyle='#000';hx.fillStyle='#fff';hx.strokeText(hd.toFixed(0)+'°',W/2,H/2-46);hx.fillText(hd.toFixed(0)+'°',W/2,H/2-46);hx.restore()}
  if(Date.now()<toastUntil)$st.textContent=toast;else if(scanKey)$st.textContent=`${hd.toFixed(0)}°  pitch ${(Math.asin(f[2])*180/Math.PI).toFixed(0)}°  │  ${$('stn').value} ${br.toFixed(0)}°/${Math.hypot(dE,dN).toFixed(1)} km  │  ${gps}  │  ☀ ${sp.az.toFixed(0)}°/${sp.alt.toFixed(0)}°${sensors?'':'  │  drag to look'}`;
  // polar PPI
  pc.clearRect(0,0,300,300);pc.drawImage(ppiImg,0,0);
@@ -545,7 +546,7 @@ function frame(){
 const DECL={KNKX:11,KSOX:11.1,KVTX:11,KMUX:12.6,KDAX:12.6,KRTX:15,KATX:15,KOTX:14.2,KFSX:9.4,KIWA:9.2,KMTX:10.8,KFTG:7.3,KABX:8,KEPZ:7.3,KEWX:2.7,KFWS:3.1,KTLX:3.7,KHGX:2,KLOT:-3.7,KMPX:-.2,KDVN:-2.6,KEAX:3,KILX:-3,KDTX:-7,KCLE:-8.6,KOKX:-12.6,KDIX:-11.2,KLWX:-10.2,KFFC:-5.3,KAMX:-6.5,KTBW:-5.6,KJAX:-6,KBOX:-14.2,KABR:4};
 let declEdited=false;
 function autoDecl(){if(declEdited)return;const u=user||ST[$('stn').value];let b=1e9,bi;
- for(const k in ST){const d=(ST[k].lat-u.lat)**2+((ST[k].lon-u.lon)*Math.cos(u.lat*Math.PI/180))**2;if(d<b){b=d;bi=k}}
+ for(const k in DECL){const d=(ST[k].lat-u.lat)**2+((ST[k].lon-u.lon)*Math.cos(u.lat*Math.PI/180))**2;if(d<b){b=d;bi=k}}
  $('decl').value=DECL[bi]}
 $('decl').oninput=()=>{declEdited=true};autoDecl();
 buildLegend();prodBtns();
@@ -578,5 +579,44 @@ $('hload').onclick=()=>{histLoad();say('Historical mode: live updates paused')};
 $('hprev').onclick=()=>{$('hsl').value=Math.max(0,+$('hsl').value-1);hLabel();histLoad()};
 $('hnext').onclick=()=>{$('hsl').value=Math.min(+$('hsl').max,+$('hsl').value+1);hLabel();histLoad()};
 $('hlive').onclick=()=>{histKey=null;$('histbtn').classList.remove('on');$('hist').hidden=true;load()};
+// ---- set north: aim the center of the screen at north, then Calibrate
+let northMode=false;
+$('north').onclick=async()=>{
+ northMode=true;
+ const r=await ask('Point the center of the screen toward north and hold steady, then tap Calibrate. Using a magnetic compass? Tap Magnetic instead.',{noinput:true,ok:'Calibrate',alt:'Magnetic'});
+ northMode=false;if(!r)return;
+ const t=r.alt?(+$('decl').value||0):0;   // magnetic north sits `declination` degrees east of true north
+ manual+=sa(t-curHd)+(locked?0:(+$('decl').value||0));locked=true;say('North set: heading calibrated');
+};
+$('calreset').onclick=()=>{manual=0;locked=false;say('Heading calibration reset')};
+// ---- nearby stations: download the WSR-88D list (NWS API, cached a week) and keep the sites within 250 km of the user
+const NEAR_KM=250;let lastFill=null;
+const dkm=(a,b)=>{const R=Math.PI/180;return 6371*Math.hypot((b.lon-a.lon)*R*Math.cos((a.lat+b.lat)/2*R),(b.lat-a.lat)*R)};
+async function loadStations(){
+ let list=null;
+ try{const c=JSON.parse(localStorage.getItem('ar1st')||'null');if(c&&Date.now()-c.t<6048e5&&c.l.length>100)list=c.l}catch(e){}
+ if(!list)try{
+  const j=await(await fetch('https://api.weather.gov/radar/stations?stationType=WSR-88D')).json();
+  list=j.features.map(f=>{const p=f.properties||{},g=f.geometry&&f.geometry.coordinates;return g&&[p.id||String(f.id).split('/').pop(),g[1],g[0],p.name||'']}).filter(x=>x&&/^[A-Z]{4}$/.test(x[0]));
+  if(list.length>100)try{localStorage.setItem('ar1st',JSON.stringify({t:Date.now(),l:list}))}catch(e){}
+ }catch(e){say('Could not download the station list; using the built-in one');return}
+ for(const [id,lat,lon,name] of list)ST[id]={lat,lon,name:ST[id]?ST[id].name:name};
+}
+function fillStations(force){
+ const sel=$('stn'),cur=sel.value;let ks=Object.keys(ST);
+ if(user){ks.sort((a,b)=>dkm(user,ST[a])-dkm(user,ST[b]));const n=ks.filter(k=>dkm(user,ST[k])<=NEAR_KM);ks=n.length?n:ks.slice(0,1)}else ks.sort();
+ if(!force&&!ks.includes(cur))ks.push(cur);   // keep a station the user picked even if it is out of range
+ sel.innerHTML='';for(const k of ks)sel.add(new Option(`${k} · ${ST[k].name}${user?` · ${dkm(user,ST[k]).toFixed(0)} km`:''}`,k));
+ sel.value=force?ks[0]:cur;
+}
+function locChanged(force){
+ if(!user)return;if(!force&&lastFill&&dkm(lastFill,user)<5)return;lastFill={...user};
+ stationsReady.then(()=>{const prev=$('stn').value;fillStations(!chosen&&!histKey);
+  if($('stn').value!=prev){autoDecl();load()}
+  const n=Object.keys(ST).filter(k=>dkm(user,ST[k])<=NEAR_KM).length;
+  say(n?`${n} NEXRAD site${n==1?'':'s'} within ${NEAR_KM} km`:`No NEXRAD site within ${NEAR_KM} km: showing the nearest`)});
+}
+const stationsReady=loadStations();
+stationsReady.then(()=>{if(!user)fillStations(false)});
 info();
 frame();
