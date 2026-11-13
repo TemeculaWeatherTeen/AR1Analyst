@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AR1Analyst · GR2-style UI preview</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body, iframe { width: 100%; height: 100%; margin: 0; border: 0; display: block; background: #080b10; }
+    iframe { position: fixed; inset: 0; }
+    #notice { position: fixed; z-index: 20; left: 50%; top: 12px; transform: translateX(-50%); padding: 8px 13px; border: 1px solid #536274; border-radius: 6px; background: #17212d; color: #e9f1fb; font: 12px/1.35 system-ui, sans-serif; box-shadow: 0 5px 20px #0008; transition: opacity .3s; pointer-events: none; }
+    #notice.off { opacity: 0; }
+  </style>
+</head>
+<body>
+  <iframe id="app" src="index.html" title="AR1Analyst GR2-style interface"></iframe>
+  <div id="notice">GR2-inspired interface preview · start AR to see the radar overlay</div>
+  <script>
+    const frame = document.getElementById('app');
+    frame.addEventListener('load', () => {
+      const doc = frame.contentDocument;
+      const style = doc.createElement('style');
+      style.textContent = `
+        :root { --g: rgba(17, 23, 31, .94); --sep: rgba(151, 174, 199, .25); --blue: #2589e8; --fill: rgba(92, 113, 137, .28); }
+        html, body { background: #080b10; }
+        .glass { border: 1px solid rgba(123, 151, 180, .27); border-radius: 6px; background: rgba(17, 23, 31, .92); backdrop-filter: blur(14px) saturate(130%); box-shadow: 0 4px 18px rgba(0,0,0,.32); }
+        button, select { border: 1px solid rgba(145, 169, 194, .24); border-radius: 4px; background-color: #202b38; color: #e8eef5; min-height: 34px; }
+        button { transition: background-color .15s, border-color .15s; }
+        button:hover, select:hover { background-color: #2b3b4e; border-color: rgba(97, 165, 232, .8); }
+        #top { left: 12px; right: 12px; top: max(12px, env(safe-area-inset-top)); padding: 9px 10px 8px; gap: 8px; border-radius: 7px; background: rgba(15, 21, 29, .96); }
+        #ttl { text-align: left; padding-left: 8px; font-size: 15px; letter-spacing: .02em; }
+        #prods { gap: 5px; padding-top: 2px; }
+        #prods button { min-width: 46px; border-radius: 4px; font-size: 12px; }
+        #prods button.on, #histbtn.on, #volbtn.on { background: #176fbd; border-color: #42a4ff; }
+        #info, #info2 { top: calc(max(12px, env(safe-area-inset-top)) + 126px); padding: 9px 11px; font-size: 12px; background: rgba(13, 19, 26, .9); }
+        #info { left: 12px; } #info2 { right: 12px; }
+        #leg { left: 12px; padding: 8px 7px; background: rgba(13, 19, 26, .88); }
+        #leg .h { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+        #lb .bar { width: 16px; }
+        #lb .lab span { font-size: 10px; text-shadow: 0 1px 3px #000; }
+        #prod { left: 12px; bottom: calc(max(10px, env(safe-area-inset-bottom)) + 56px); padding: 7px 11px; border-radius: 4px; background: rgba(13, 19, 26, .94); font-size: 12px; letter-spacing: .03em; }
+        #st { left: 12px; right: 12px; bottom: max(10px, env(safe-area-inset-bottom)); min-height: 38px; padding: 10px 13px; border-radius: 5px; background: rgba(13, 19, 26, .94); color: #c6d3e1; font-size: 12px; }
+        #ppi { right: 12px; bottom: calc(max(10px, env(safe-area-inset-bottom)) + 56px); width: 170px; height: 170px; background: rgba(10, 15, 21, .88); box-shadow: 0 5px 22px #0009; }
+        #sheet, #hist { border-radius: 7px; background: rgba(17, 23, 31, .98); }
+        #sheet .row, #hist .row { border-top-color: rgba(151, 174, 199, .18); }
+        #go { border: 1px solid #67b3f4; border-radius: 6px; background: #176fbd; box-shadow: 0 8px 30px #000a; }
+        @media (max-width: 600px) {
+          #top { left: 7px; right: 7px; padding: 7px; }
+          #info, #info2 { top: calc(max(8px, env(safe-area-inset-top)) + 122px); }
+          #ppi { width: 138px; height: 138px; }
+          #ttl { font-size: 13px; }
+        }
+      `;
+      doc.head.appendChild(style);
+      setTimeout(() => document.getElementById('notice').classList.add('off'), 5000);
+    });
+  </script>
+</body>
+</html>
